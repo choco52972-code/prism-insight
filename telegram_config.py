@@ -47,7 +47,7 @@ class TelegramConfig:
 
         # Load broadcast channel IDs per language
         self._load_broadcast_channels()
-    
+
     def _load_env(self):
         """
         Load environment variables from .env file
@@ -76,7 +76,7 @@ class TelegramConfig:
                 logger.info(f"Broadcast channel loaded: {lang} -> {channel_id[:10]}...")
             else:
                 logger.warning(f"Broadcast channel ID not configured for language: {lang} (env var: {env_key})")
-    
+
     @property
     def use_telegram(self) -> bool:
         """Return whether telegram is enabled"""
@@ -108,7 +108,7 @@ class TelegramConfig:
             Channel ID for the language, or None if not configured
         """
         return self._broadcast_channel_ids.get(language)
-    
+
     def is_configured(self) -> bool:
         """
         Check if telegram is properly configured
@@ -154,7 +154,7 @@ class TelegramConfig:
             logger.info(f"   - Bot token: {'Configured' if self._bot_token else 'Not configured'}")
         else:
             logger.info("❌ Telegram messaging disabled")
-    
+
     def __repr__(self) -> str:
         return (
             f"TelegramConfig(use_telegram={self._use_telegram}, "

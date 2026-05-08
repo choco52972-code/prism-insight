@@ -1,7 +1,7 @@
-"""ChatGPT OAuth PKCE Login Flow.
+"""Claude OAuth PKCE Login Flow.
 
-One-time interactive login that opens a browser for ChatGPT authentication.
-Uses the official Codex CLI OAuth client_id and PKCE flow.
+One-time interactive login that opens a browser for Claude authentication.
+Uses the official Claude Code CLI OAuth client_id and PKCE flow.
 """
 
 import asyncio
@@ -40,52 +40,10 @@ def _generate_pkce() -> tuple[str, str]:
     return verifier, challenge
 
 
-def _parse_jwt_claims(id_token: str) -> dict:
-    """Extract claims from JWT id_token without verification (base64 decode only)."""
-    parts = id_token.split(".")
-    if len(parts) < 2:
-        return {}
-    payload = parts[1]
-    # Add padding
-    padding = 4 - len(payload) % 4
-    if padding != 4:
-        payload += "=" * padding
-    try:
-        return json.loads(base64.urlsafe_b64decode(payload))
-    except Exception:
-        return {}
-
-
-def _extract_account_id(claims: dict) -> str | None:
-    """Extract account_id from JWT claims.
-
-    The claim path varies across token types:
-    - id_token: organizations[0].id or sub
-    - access_token: "https://api.openai.com/auth".chatgpt_account_id
-    """
-    # Try the OpenAI auth namespace (access_token pattern)
-    auth_ns = claims.get("https://api.openai.com/auth", {})
-    if isinstance(auth_ns, dict):
-        acct = auth_ns.get("chatgpt_account_id")
-        if acct:
-            return acct
-    # Try direct chatgpt_account_id
-    if claims.get("chatgpt_account_id"):
-        return claims["chatgpt_account_id"]
-    # Try organizations field (id_token pattern)
-    orgs = claims.get("organizations", [])
-    if orgs and isinstance(orgs, list):
-        first_org = orgs[0] if isinstance(orgs[0], str) else orgs[0].get("id", "")
-        if first_org:
-            return first_org
-    # Fallback to sub
-    return claims.get("sub")
-
-
 async def login(force: bool = False) -> dict:
     """Run the OAuth PKCE login flow.
 
-    Returns dict with access_token, refresh_token, expires_at, account_id.
+    Returns dict with access_token, refresh_token, expires_at.
     """
     # Check existing auth
     if not force and AUTH_FILE.exists():
@@ -102,7 +60,6 @@ async def login(force: bool = False) -> dict:
     verifier, challenge = _generate_pkce()
     state = secrets.token_hex(16)
 
-    # Build authorization URL
     params = {
         "response_type": "code",
         "client_id": OAUTH_CLIENT_ID,
@@ -111,11 +68,9 @@ async def login(force: bool = False) -> dict:
         "code_challenge": challenge,
         "code_challenge_method": "S256",
         "state": state,
-        "id_token_add_organizations": "true",
-        "codex_cli_simplified_flow": "true",
-        "originator": "prism_insight",
     }
     auth_url = f"{OAUTH_AUTHORIZE_URL}?{urlencode(params)}"
+    logger.debug(f"Generated Auth URL: {auth_url}")
 
     # Set up callback server
     code_future: asyncio.Future[str] = asyncio.get_event_loop().create_future()
@@ -154,7 +109,7 @@ async def login(force: bool = False) -> dict:
         )
 
     app = web.Application()
-    app.router.add_get("/auth/callback", handle_callback)
+    app.router.add_get("/callback", handle_callback)
 
     runner = web.AppRunner(app)
     await runner.setup()
@@ -165,7 +120,7 @@ async def login(force: bool = False) -> dict:
         logger.info(f"Callback server started on port {OAUTH_CALLBACK_PORT}")
 
         # Open browser
-        print(f"\nOpening browser for ChatGPT login...")
+        print(f"\nOpening browser for Claude login...")
         print(f"If browser doesn't open, visit:\n{auth_url}\n")
         webbrowser.open(auth_url)
 
@@ -183,26 +138,19 @@ async def login(force: bool = False) -> dict:
         "redirect_uri": OAUTH_REDIRECT_URI,
         "client_id": OAUTH_CLIENT_ID,
         "code_verifier": verifier,
+        "state": state,
     }
 
     async with aiohttp.ClientSession() as session:
         async with session.post(
             OAUTH_TOKEN_URL,
-            data=token_data,
-            headers={
-                "Content-Type": "application/x-www-form-urlencoded",
-                "Accept-Encoding": "gzip, deflate"
-            },
+            json=token_data,
+            headers={"Content-Type": "application/json"},
         ) as resp:
             if resp.status != 200:
                 body = await resp.text()
                 raise RuntimeError(f"Token exchange failed ({resp.status}): {body}")
             tokens = await resp.json()
-
-    # Parse id_token for account_id
-    id_token = tokens.get("id_token", "")
-    claims = _parse_jwt_claims(id_token)
-    account_id = _extract_account_id(claims)
 
     # Build auth data
     expires_in = tokens.get("expires_in", 3600)
@@ -210,9 +158,8 @@ async def login(force: bool = False) -> dict:
         "access_token": tokens["access_token"],
         "refresh_token": tokens.get("refresh_token", ""),
         "expires_at": int(time.time()) + expires_in,
-        "account_id": account_id or "",
         "issued_at": int(time.time()),
-        "auth_method": "chatgpt_oauth_pkce",
+        "auth_method": "claude_oauth_pkce",
     }
 
     # Save tokens
@@ -263,7 +210,6 @@ async def status() -> None:
     print(f"Status: {'VALID' if expires_at > now else 'EXPIRED'}")
     print(f"Access token expires: {time.ctime(expires_at)}")
     print(f"Refresh token: {'present' if has_refresh else 'missing'}")
-    print(f"Account ID: {auth.get('account_id', 'unknown')}")
     print(f"Auth file: {AUTH_FILE}")
 
 
@@ -271,8 +217,8 @@ def _main() -> None:
     import argparse
 
     parser = argparse.ArgumentParser(
-        prog="python -m cores.chatgpt_proxy.oauth_login",
-        description="ChatGPT OAuth login. Re-uses an existing token unless --force is set.",
+        prog="python -m cores.claude_proxy.oauth_login",
+        description="Claude OAuth login. Re-uses an existing token unless --force is set.",
     )
     parser.add_argument(
         "--force",
@@ -296,7 +242,6 @@ def _main() -> None:
             print("Already authenticated — no login needed.")
             print(f"  Status:        {status_str}")
             print(f"  Expires at:    {time.ctime(expires_at)}")
-            print(f"  Account ID:    {auth.get('account_id', 'unknown')}")
             print(f"  Token file:    {AUTH_FILE}")
             print()
             print("Run again with --force to re-authenticate (switch account, refresh expired refresh token, etc.).")
