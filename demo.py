@@ -94,7 +94,13 @@ async def generate_report(ticker: str, company_name: str, language: str = "ko") 
     proxy_mode = os.getenv("PRISM_OPENAI_AUTH_MODE", "")
     print(f"DEBUG: proxy_mode = '{proxy_mode}'")
     
-    if proxy_mode == "chatgpt_oauth" or proxy_mode == "claude_oauth":
+    if proxy_mode == "vibeconduit":
+        print("=== VibeConduit 프록시 설정 ===")
+        os.environ["OPENAI_BASE_URL"] = "http://localhost:8317/v1"
+        os.environ["OPENAI_API_KEY"] = ""
+        print(f"   OPENAI_BASE_URL={os.environ.get('OPENAI_BASE_URL')}")
+        print("   OPENAI_API_KEY=(empty)")
+    elif proxy_mode == "chatgpt_oauth" or proxy_mode == "claude_oauth":
         try:
             # Add project root to sys.path for this import (중요!)
             project_root = Path(__file__).parent
