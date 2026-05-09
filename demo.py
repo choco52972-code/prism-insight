@@ -99,7 +99,7 @@ async def generate_report(ticker: str, company_name: str, language: str = "ko") 
         os.environ["OPENAI_BASE_URL"] = "http://localhost:8317/v1"
         os.environ["OPENAI_API_KEY"] = ""
         print(f"   OPENAI_BASE_URL={os.environ.get('OPENAI_BASE_URL')}")
-        print("   OPENAI_API_KEY=(empty)")
+        print("   OPENAI_API_KEY=***")
     elif proxy_mode == "chatgpt_oauth" or proxy_mode == "claude_oauth":
         try:
             # Add project root to sys.path for this import (중요!)
@@ -149,7 +149,7 @@ async def generate_report(ticker: str, company_name: str, language: str = "ko") 
             print("✅ 환경 변수 설정:")
             print(f"   OPENAI_BASE_URL={os.environ.get('OPENAI_BASE_URL')}")
             if os.environ.get('OPENAI_API_KEY'):
-                print("   OPENAI_API_KEY=***")
+        print("   OPENAI_API_KEY=***")
             else:
                 print("   OPENAI_API_KEY=(empty)")
             
