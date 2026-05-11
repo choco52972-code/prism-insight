@@ -1,0 +1,56 @@
+# Prism Insight 설정 파일
+# 이 파일 하나만 수정하면 KIS ↔ Kiwoom 전환 가능
+
+# ===== 브로커 선택 =====
+# "kis" 또는 "kiwoom" 중 하나 선택
+broker: "kiwoom"
+
+# ===== 거래 모드 =====
+# "mock" (모의거래) 또는 "real" (실전거래)
+mode: "mock"
+
+# ===== 계좌 설정 =====
+account:
+  # 선택한 브로커의 기본 계좌
+  default_account:
+    kis: "1234567890"
+    kiwoom: "81203640"
+  
+  # 선택적: 다른 계좌들
+  additional_accounts:
+    - broker: "kiwoom"
+      account_no: "81203640"
+      nickname: "모의투자 계좌"
+    - broker: "kis"  
+      account_no: "1234567890"
+      nickname: "주거래 계좌"
+
+# ===== API 설정 (실전 모드일 때만 필요) =====
+api_credentials:
+  kis:
+    api_key: ""
+    secret_key: ""
+    app_name: "Prism Insight KIS"
+  
+  kiwoom:
+    api_key: ""
+    secret_key: ""
+    app_name: "Prism Insight Kiwoom"
+
+# ===== 거래 설정 =====
+trading:
+  fee_rate: 0.00015    # 0.015% 수수료
+  tax_rate: 0.0003     # 0.03% 세금
+  min_order_amount: 10000
+  max_order_amount: 1000000000
+
+# ===== Mock 설정 (모의 모드일 때) =====
+mock:
+  initial_balance: 100000000  # 초기 자금: 1억원
+  stock_count: 30            # 모의 보유 종목 수
+  trade_success_rate: 0.95   # 거래 성공률
+
+# ===== 로깅 =====
+logging:
+  level: "INFO"
+  file: "logs/prism_trading.log"

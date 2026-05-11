@@ -1,0 +1,79 @@
+# Prism Insight 멀티 브로커 설정 파일
+# KIS와 Kiwoom 둘 다 동시에 사용 가능
+
+# ===== 브로커 활성화 =====
+brokers:
+  kiwoom:
+    enabled: true
+    mode: "mock"        # "mock" 또는 "real"
+    primary_market: "korea"  # 한국주식 담당
+    
+    # Kiwoom 계좌 설정
+    accounts:
+      - account_no: "81203640"
+        nickname: "모의투자 계좌"
+        market: "korea"
+        main: true
+  
+  kis:
+    enabled: true
+    mode: "mock"        # "mock" 또는 "real"
+    primary_market: "us"     # 미국주식 담당
+    
+    # KIS 계좌 설정
+    accounts:
+      - account_no: "1234567890"
+        nickname: "주거래 계좌"
+        market: "us"
+        main: true
+
+# ===== 시장별 브로커 지정 =====
+market_routing:
+  korea: "kiwoom"    # 한국주식은 Kiwoom 사용
+  us: "kis"          # 미국주식은 KIS 사용
+  futures: "kis"     # 선물은 KIS 사용
+  options: "kis"     # 옵션은 KIS 사용
+
+# ===== API 설정 (실전 모드일 때) =====
+api_credentials:
+  kiwoom:
+    api_key: ""
+    secret_key: ""
+    app_name: "Prism Insight Kiwoom"
+  
+  kis:
+    api_key: ""
+    secret_key: ""
+    app_name: "Prism Insight KIS"
+
+# ===== 통합 포트폴리오 설정 =====
+portfolio:
+  unified_view: true           # 통합 포트폴리오 보기
+  auto_sync: true              # 자동 동기화
+  sync_interval_minutes: 5     # 동기화 간격
+  currency_conversion: true    # 통화 환전 적용
+  base_currency: "KRW"         # 기준 통화
+
+# ===== 거래 기본값 =====
+trading_defaults:
+  fee_rate: 0.00015
+  tax_rate: 0.0003
+  min_order_amount: 10000
+  max_order_amount: 1000000000
+
+# ===== Mock 설정 =====
+mock:
+  kiwoom:
+    initial_balance: 50000000    # 5천만원
+    korean_stocks: 20           # 한국주식 종목 수
+  
+  kis:
+    initial_balance: 50000000    # 5천만원 (미국주식은 달러로 환산)
+    us_stocks: 15               # 미국주식 종목 수
+    exchange_rate: 1300         # 1 USD = 1300 KRW
+
+# ===== 로깅 =====
+logging:
+  level: "INFO"
+  separate_logs: true          # 브로커별 별도 로그
+  unified_log: "logs/prism_multi_broker.log"

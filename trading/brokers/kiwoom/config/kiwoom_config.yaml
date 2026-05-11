@@ -1,0 +1,34 @@
+# Prism Insight Kiwoom Broker 설정 파일
+# KIS broker와 동일한 패턴 적용
+
+# 기본 모드: mock (모의투자) 또는 real (실전투자)
+mode: "mock"
+
+# Kiwoom API 자격증명
+api_key: "ejgRMDodm5C1cgDzYwcILx75rHtSpIQeOhkmua2UqZ0"
+api_secret: "51d19jU-Ld4ch6KBN5tFqHj0CU7t07BS-v4QSBCCAys"
+
+# 기본 계좌 번호 (선택사항)
+default_account: "81203640"
+
+# 계좌 목록
+accounts:
+  - account_no: "81203640"
+    account_pw: "1004"
+    mode: "mock"
+    name: "Simulation Account"
+    
+  # 실전 계좌 예시
+  # - account_no: "32406801"
+  #   account_pw: "password"
+  #   mode: "real"
+  #   name: "Real Account 1"
+
+# API 엔드포인트 (자동 설정됨)
+# mock 모드: https://mockapi.kiwoom.com
+# real 모드: https://api.kiwoom.com
+
+# 참고: 
+# 1. 현재는 모의투자 모드가 기본으로 설정됨
+# 2. 실제 거래를 원하실 경우 mode를 "real"로 변경하고 API 키를 확인하세요
+# 3. 계좌 정보는 KIS와 동일한 구조로 관리합니다
