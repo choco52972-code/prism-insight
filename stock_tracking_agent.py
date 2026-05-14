@@ -75,7 +75,7 @@ from tracking import (
     CompressionManager,
     TelegramSender,
 )
-from trading import kis_auth as ka
+from trading.brokers.kis.auth import KisAuth as ka
 
 # Create MCPApp instance
 app = MCPApp(name="stock_tracking")
