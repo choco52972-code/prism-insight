@@ -1,252 +1,256 @@
 """
-KIS Broker Trading 클래스 (설정 기반 Mock/Real)
-KIS 거래 기능을 제공하는 클래스
+KIS Broker Trading — wraps kis_original/domestic_stock_trading.py via composition.
+
+Implements BaseTrading for the multi-broker framework while exposing the full
+original async_buy_stock / async_sell_stock / get_portfolio API for callers
+that use DomesticStockTrading directly through this package.
 """
 
-import asyncio
 import logging
-import time
-import yaml
-from pathlib import Path
-from typing import Optional, Dict, List, Any, Union
-from dataclasses import dataclass
+from datetime import datetime
+from typing import Optional, Dict, List, Any
 
-from trading.common.base_trading import BaseTrading, Order, Balance, Position, MarketPrice
+from trading.common.base_trading import (
+    BaseTrading, Order, Balance, Position, MarketPrice,
+)
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class KISTradingConfig:
-    """KIS 거래 설정"""
-    fee_rate: float = 0.00015  # 0.015%
-    tax_rate: float = 0.0003   # 0.03%
-    min_order_amount: int = 10000
-    max_order_amount: int = 1000000000
-    price_variation_pct: float = 3.0  # 가격 변동률
-    
-    
+def _load_orig():
+    """Import the original classes lazily to avoid circular-import issues."""
+    from trading.brokers.kis_original.domestic_stock_trading import (
+        DomesticStockTrading as _Orig,
+        MultiAccountDomesticStockTrading as _OrigMulti,
+    )
+    return _Orig, _OrigMulti
+
+
 class DomesticStockTrading(BaseTrading):
-    """KIS 국내주식 거래 클래스 (설정 기반)"""
-    
-    def __init__(self, auth):
-        super().__init__()
-        self.auth = auth
-        self.mode = auth.mode if hasattr(auth, 'mode') else "mock"
-        
-        # 설정 로드
-        self._config_cache = {}
-        self._load_config()
-        
-        # Mock 거래 데이터
-        self._mock_balance = Balance(
-            total_balance=auth.config.get("mock_config", {}).get("initial_balance", 100000000),
-            available_balance=auth.config.get("mock_config", {}).get("initial_balance", 100000000) * 0.98,
-            deposit=auth.config.get("mock_config", {}).get("initial_balance", 100000000),
-            evaluation_amount=auth.config.get("mock_config", {}).get("initial_balance", 100000000)
+    """
+    KIS 국내주식 거래 클래스.
+
+    kis_original.DomesticStockTrading을 내부적으로 보유(composition)하고:
+    - BaseTrading 추상 메서드를 구현해 다중 브로커 프레임워크와 호환
+    - 기존 async_buy_stock / async_sell_stock / get_portfolio API를 그대로 노출
+      하여 기존 호출부가 코드 변경 없이 계속 동작
+    """
+
+    def __init__(
+        self,
+        auth=None,
+        mode: str = None,
+        buy_amount: int = None,
+        auto_trading: bool = None,
+        account_name: str = None,
+        account_index: int = None,
+        product_code: str = "01",
+    ):
+        if auth is None:
+            from trading.brokers.kis.auth import KisAuth
+            auth = KisAuth()
+        super().__init__(auth)
+
+        _Orig, _ = _load_orig()
+        _mode = mode if mode is not None else _Orig.DEFAULT_MODE
+        _auto = auto_trading if auto_trading is not None else _Orig.AUTO_TRADING
+
+        self._orig = _Orig(
+            mode=_mode,
+            buy_amount=buy_amount,
+            auto_trading=_auto,
+            account_name=account_name,
+            account_index=account_index,
+            product_code=product_code,
         )
-        
-        self._mock_positions = []
-        self._mock_orders = {}
-        self._order_counter = 1
-        
-        logger.info(f"KIS Trading 초기화: mode={self.mode}")
-    
-    def _load_config(self):
-        """거래 설정 로드"""
-        try:
-            config = self.auth.config
-            
-            # 거래 설정
-            trading_config = config.get("trading", {})
-            self.trading_config = KISTradingConfig(
-                fee_rate=trading_config.get("fee_rate", 0.00015),
-                tax_rate=trading_config.get("tax_rate", 0.0003),
-                min_order_amount=trading_config.get("min_order_amount", 10000),
-                max_order_amount=trading_config.get("max_order_amount", 1000000000),
-                price_variation_pct=trading_config.get("price_variation_pct", 3.0)
-            )
-            
-            # Mock 설정
-            mock_config = config.get("mock_config", {})
-            self._initial_balance = mock_config.get("initial_balance", 100000000)
-            self._stock_count = mock_config.get("stock_count", 50)
-            self._trade_success_rate = mock_config.get("trade_success_rate", 0.95)
-            
-        except Exception as e:
-            logger.warning(f"거래 설정 로드 실패, 기본값 사용: {e}")
-            self.trading_config = KISTradingConfig()
-            self._initial_balance = 100000000
-            self._stock_count = 50
-            self._trade_success_rate = 0.95
-    
-    def _generate_mock_position(self, idx: int) -> Position:
-        """Mock 보유 포지션 생성"""
-        symbols = ["005930", "000660", "035420", "005380", "051910",
-                   "006400", "028260", "012330", "086790", "032640"]
-        
-        symbol = symbols[idx % len(symbols)]
-        quantity = (idx + 1) * 10
-        avg_price = [70000, 80000, 120000, 200000, 50000][idx % 5]
-        current_price = avg_price * (1 + (self.trading_config.price_variation_pct / 100) * (idx % 3 - 1))
-        
-        return Position(
-            symbol=symbol,
-            quantity=quantity,
-            average_price=avg_price,
-            current_price=current_price,
-            evaluation_amount=quantity * current_price,
-            profit_loss=quantity * (current_price - avg_price),
-            profit_loss_rate=((current_price - avg_price) / avg_price) * 100 if avg_price else 0
+        self.mode = self._orig.mode
+        self.account_name = self._orig.account_name
+        self.account_key = self._orig.account_key
+
+    # ── BaseTrading abstract methods ──────────────────────────────────────
+
+    async def get_current_price(self, symbol: str) -> MarketPrice:
+        result = self._orig.get_current_price(symbol)
+        if result is None:
+            raise RuntimeError(f"get_current_price failed for {symbol}")
+        return MarketPrice(
+            symbol=result.get("stock_code", symbol),
+            current_price=float(result.get("current_price", 0)),
+            open_price=0.0,
+            high_price=0.0,
+            low_price=0.0,
+            volume=int(result.get("volume", 0)),
+            change=0.0,
+            change_rate=float(result.get("change_rate", 0)),
+            timestamp=datetime.now(),
         )
-    
-    async def _ensure_client(self):
-        """거래 클라이언트 준비"""
-        if self.mode == "real" and self.auth.is_real_mode():
-            # 실제 KIS 모드
-            # 여기에 실제 KIS API 연결 코드
-            logger.debug("실제 KIS 모드 (현재 Mock으로 동작)")
-        # Mock 모드는 별도 처리가 필요 없음
-    
-    async def place_order(self, symbol: str, order_type: str, side: str, quantity: int,
-                         price: Optional[float] = None, **kwargs) -> Order:
-        """주문 실행"""
-        await self._ensure_client()
-        
-        logger.info(f"place_order: {symbol} {side.upper()} {order_type} {quantity}@{price}")
-        
-        if self.mode == "mock":
-            # Mock 주문 처리
-            order_id = f"KIS_{self._order_counter:06d}"
-            self._order_counter += 1
-            
-            # 실제 거래 로직 대신 Mock
-            if self._trade_success_rate >= 1.0 or (hash(symbol + side) % 100) / 100.0 < self._trade_success_rate:
-                status = "filled"
-                filled_price = price or self._get_mock_price(symbol)
-                
-                # 잔고 업데이트 (간단한 Mock)
-                order_value = filled_price * quantity
-                self._mock_balance.total_balance -= order_value * 0.00015  # 수수료
-                self._mock_balance.available_balance = self._mock_balance.total_balance * 0.98
-                
-                logger.info(f"Mock 주문 성공: {order_id}, 가격: {filled_price}")
-            else:
-                status = "rejected"
-                filled_price = None
-                logger.info(f"Mock 주문 거부: {order_id}")
-            
-            order = Order(
-                symbol=symbol,
-                order_type=order_type,
-                side=side,
-                quantity=quantity,
-                price=price,
-                order_id=order_id,
-                status=status,
-                account_no=kwargs.get("account_no") or self.auth.get_default_account()
-            )
-            
-            self._mock_orders[order_id] = order
-            return order
-        
-        else:
-            # Mock으로 처리 (실제 구현은 추후)
-            logger.warning("실제 KIS 모드는 현재 Mock으로 동작")
-            return await self.place_order(symbol, order_type, side, quantity, price, **kwargs)
-    
-    async def cancel_order(self, order_id: str, **kwargs) -> bool:
-        """주문 취소"""
-        await self._ensure_client()
-        
-        logger.info(f"cancel_order: {order_id}")
-        
-        if order_id in self._mock_orders:
-            order = self._mock_orders[order_id]
-            if order.status in ["pending", "partially_filled"]:
-                order.status = "canceled"
-                return True
-        
-        return False
-    
+
     async def get_balance(self, account_no: Optional[str] = None) -> Balance:
-        """계좌 잔고 조회"""
-        await self._ensure_client()
-        
-        logger.info(f"get_balance: {account_no or '기본계좌'}")
-        
-        if self.mode == "mock":
-            # Mock 잔고 반환
-            account = account_no or self.auth.get_default_account()
-            logger.debug(f"Mock 잔고 반환: {account}, {self._mock_balance}")
-            return self._mock_balance
-        else:
-            # 실전 모드는 Mock으로 대체
-            logger.warning("실제 KIS 모드는 현재 Mock으로 동작")
-            return await self.get_balance(account_no)
-    
+        summary = self._orig.get_account_summary()
+        if summary is None:
+            return Balance(
+                total_balance=0, available_balance=0, deposit=0,
+                evaluation_amount=0, profit_loss=0, profit_loss_rate=0,
+            )
+        return Balance(
+            total_balance=float(summary.get("total_eval_amount", 0)),
+            available_balance=float(summary.get("available_amount", 0)),
+            deposit=float(summary.get("deposit", 0)),
+            evaluation_amount=float(summary.get("total_eval_amount", 0)),
+            profit_loss=float(summary.get("total_profit_amount", 0)),
+            profit_loss_rate=float(summary.get("total_profit_rate", 0)),
+        )
+
     async def get_positions(self, account_no: Optional[str] = None) -> List[Position]:
-        """보유 포지션 조회"""
-        await self._ensure_client()
-        
-        logger.info(f"get_positions: {account_no or '기본계좌'}")
-        
-        if self.mode == "mock":
-            # Mock 포지션 생성
-            if not self._mock_positions:
-                self._mock_positions = [
-                    self._generate_mock_position(i) 
-                    for i in range(min(self._stock_count, 10))
-                ]
-            return self._mock_positions
-        else:
-            # 실전 모드는 Mock으로 대체
-            logger.warning("실제 KIS 모드는 현재 Mock으로 동작")
-            return await self.get_positions(account_no)
-    
-    async def get_order_status(self, order_id: str, **kwargs) -> Optional[Order]:
-        """주문 상태 조회"""
-        await self._ensure_client()
-        
-        logger.info(f"get_order_status: {order_id}")
-        
-        return self._mock_orders.get(order_id)
-    
-    async def get_order_history(self, start_date: Optional[str] = None,
-                               end_date: Optional[str] = None, **kwargs) -> List[Order]:
-        """주문 히스토리 조회"""
-        await self._ensure_client()
-        
-        logger.info(f"get_order_history: {start_date} ~ {end_date}")
-        
-        return list(self._mock_orders.values())
-    
-    async def close(self):
-        """리소스 정리"""
-        logger.info("KIS Trading 리소스 정리")
-        self._mock_positions.clear()
-        self._mock_orders.clear()
-    
-    def _get_mock_price(self, symbol: str) -> float:
-        """Mock 가격 생성"""
-        # 심볼에 따라 기본 가격 설정
-        base_prices = {
-            "005930": 70000,  # 삼성전자
-            "000660": 80000,  # SK하이닉스  
-            "035420": 120000, # NAVER
-            "005380": 200000, # 현대차
-            "051910": 50000,  # LG화학
-            "006400": 45000,  # 삼성SDI
-            "028260": 35000,  # 삼성물산
-            "012330": 28000,  # 현대모비스
-            "086790": 22000,  # 셀트리온
-            "032640": 18000,  # LG유플러스
-        }
-        
-        base_price = base_prices.get(symbol, 50000)
-        variation = self.trading_config.price_variation_pct / 100
-        return base_price * (1 + variation * (hash(symbol) % 10 - 5) / 10.0)
+        portfolio = self._orig.get_portfolio()
+        if not portfolio:
+            return []
+        return [
+            Position(
+                symbol=item.get("stock_code", ""),
+                quantity=int(item.get("quantity", 0)),
+                average_price=float(item.get("avg_price", 0)),
+                current_price=float(item.get("current_price", 0)),
+                evaluation_amount=float(item.get("eval_amount", 0)),
+                profit_loss=float(item.get("profit_amount", 0)),
+                profit_loss_rate=float(item.get("profit_rate", 0)),
+            )
+            for item in portfolio
+        ]
+
+    async def place_order(self, order: Order) -> Dict[str, Any]:
+        limit_price = int(order.price) if order.price else None
+        if order.side == "buy":
+            return await self._orig.async_buy_stock(order.symbol, limit_price=limit_price)
+        return await self._orig.async_sell_stock(order.symbol, limit_price=limit_price)
+
+    async def cancel_order(self, order_id: str, symbol: str,
+                           account_no: Optional[str] = None) -> bool:
+        # KIS 국내주식 API는 취소 주문을 별도 엔드포인트로 처리; 현재 미지원
+        return False
+
+    async def get_order_status(self, order_id: str, symbol: str,
+                               account_no: Optional[str] = None) -> Dict[str, Any]:
+        return {"order_id": order_id, "status": "unknown"}
+
+    # ── Original API passthrough (backward compat) ────────────────────────
+
+    async def async_buy_stock(self, stock_code: str, buy_amount: int = None,
+                              timeout: float = 30.0,
+                              limit_price: int = None) -> Dict[str, Any]:
+        return await self._orig.async_buy_stock(
+            stock_code, buy_amount=buy_amount, timeout=timeout, limit_price=limit_price,
+        )
+
+    async def async_sell_stock(self, stock_code: str, timeout: float = 30.0,
+                               limit_price: int = None) -> Dict[str, Any]:
+        return await self._orig.async_sell_stock(
+            stock_code, timeout=timeout, limit_price=limit_price,
+        )
+
+    def get_portfolio(self) -> List[Dict[str, Any]]:
+        return self._orig.get_portfolio()
+
+    def get_account_summary(self) -> Optional[Dict[str, Any]]:
+        return self._orig.get_account_summary()
+
+    def calculate_buy_quantity(self, stock_code: str,
+                               buy_amount: int = None) -> int:
+        return self._orig.calculate_buy_quantity(stock_code, buy_amount=buy_amount)
+
+    def get_holding_quantity(self, stock_code: str) -> int:
+        return self._orig.get_holding_quantity(stock_code)
 
 
-# Alias for compatibility
+# Populate class-level constants from the original (needed by AsyncTradingContext)
+try:
+    _Orig, _ = _load_orig()
+    DomesticStockTrading.DEFAULT_BUY_AMOUNT = _Orig.DEFAULT_BUY_AMOUNT
+    DomesticStockTrading.AUTO_TRADING = _Orig.AUTO_TRADING
+    DomesticStockTrading.DEFAULT_MODE = _Orig.DEFAULT_MODE
+except Exception:
+    DomesticStockTrading.DEFAULT_BUY_AMOUNT = 1_000_000
+    DomesticStockTrading.AUTO_TRADING = False
+    DomesticStockTrading.DEFAULT_MODE = "demo"
+
+
+class AsyncTradingContext:
+    """
+    Async context manager — yields a DomesticStockTrading instance.
+    Drop-in replacement for the original AsyncTradingContext.
+    """
+
+    AUTO_TRADING = DomesticStockTrading.AUTO_TRADING
+    DEFAULT_MODE = DomesticStockTrading.DEFAULT_MODE
+
+    def __init__(
+        self,
+        mode: str = None,
+        buy_amount: int = None,
+        auto_trading: bool = None,
+        account_name: str = None,
+        account_index: int = None,
+        product_code: str = "01",
+    ):
+        self._kwargs = dict(
+            mode=mode,
+            buy_amount=buy_amount,
+            auto_trading=auto_trading,
+            account_name=account_name,
+            account_index=account_index,
+            product_code=product_code,
+        )
+        self._trader: Optional[DomesticStockTrading] = None
+
+    async def __aenter__(self) -> DomesticStockTrading:
+        self._trader = DomesticStockTrading(**self._kwargs)
+        return self._trader
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb) -> None:
+        pass
+
+
+class MultiAccountKisTrading:
+    """Multi-account fanout trading — wraps MultiAccountDomesticStockTrading."""
+
+    def __init__(
+        self,
+        mode: str = None,
+        buy_amount: int = None,
+        auto_trading: bool = None,
+        product_code: str = "01",
+    ):
+        _Orig, _OrigMulti = _load_orig()
+        _mode = mode if mode is not None else _Orig.DEFAULT_MODE
+        self._orig = _OrigMulti(
+            mode=_mode,
+            buy_amount=buy_amount,
+            auto_trading=auto_trading,
+            product_code=product_code,
+        )
+
+    async def async_buy_stock(self, stock_code: str, buy_amount: int = None,
+                              timeout: float = 30.0,
+                              limit_price: int = None) -> Dict[str, Any]:
+        return await self._orig.async_buy_stock(
+            stock_code, buy_amount=buy_amount, timeout=timeout, limit_price=limit_price,
+        )
+
+    async def async_sell_stock(self, stock_code: str, timeout: float = 30.0,
+                               limit_price: int = None) -> Dict[str, Any]:
+        return await self._orig.async_sell_stock(
+            stock_code, timeout=timeout, limit_price=limit_price,
+        )
+
+    def get_portfolio(self) -> List[Dict[str, Any]]:
+        return self._orig.get_portfolio()
+
+    def get_account_summary(self) -> Optional[Dict[str, Any]]:
+        return self._orig.get_account_summary()
+
+    def get_current_price(self, stock_code: str) -> Optional[Dict[str, Any]]:
+        return self._orig.get_current_price(stock_code)
+
+
+# Alias
 KisTrading = DomesticStockTrading

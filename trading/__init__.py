@@ -25,6 +25,10 @@ from .factory import (
     create_broker_from_string
 )
 
+# Legacy: `from trading import kis_auth as ka`
+# Exposes the real kis_original module as a trading-package attribute.
+from .brokers.kis_original import kis_auth  # noqa: F401
+
 # 설정 관리자 (선택적)
 try:
     from .config_manager import BrokerConfigManager, broker_quick_start, get_config_manager

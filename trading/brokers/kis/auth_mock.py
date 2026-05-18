@@ -80,35 +80,9 @@ class KISAccountProvider:
                 return acc["account_no"]
         return accounts[0]["account_no"] if accounts else None
 
-# KISTokenProvider와 KISAccountProvider는 그대로 유지
-        
-    async def get_token(self) -> str:
-        """인증 토큰 가져오기"""
-        return self.token_provider.get_token()
-        
-    async def validate_token(self) -> bool:
-        """토큰 검증 (항상 true)"""
-        return True
-        
-    def get_default_account(self) -> Optional[str]:
-        """기본 계좌 번호 가져오기"""
-        return self.account_provider.get_default_account()
-        
-    def get_config_root(self) -> str:
-        """설정 디렉토리 경로"""
-        config_path = self.get_config("config_path", "")
-        if config_path:
-            return config_path
-            
-        # 기본 경로 생성
-        import os
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        return os.path.join(current_dir, "config")
-
-# kis_auth 모듈로 사용 가능하도록
 __all__ = [
     "KISAuthError",
-    "TokenFileError", 
+    "TokenFileError",
     "CredentialMismatchError",
     "TokenRequestError",
     "SecurityError",
@@ -116,5 +90,4 @@ __all__ = [
     "ACCESS_TOKEN_EXPIRED",
     "KISTokenProvider",
     "KISAccountProvider",
-    "KISAuth"
 ]
