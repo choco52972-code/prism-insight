@@ -324,15 +324,18 @@ class StockAnalysisOrchestrator:
             from mcp_agent.workflows.llm.augmented_llm_openai import OpenAIAugmentedLLM
             from cores.agents.macro_intelligence_agent import create_macro_intelligence_agent
 
+            # MCPApp 인스턴스 생성 - 애플리케이션의 시작점을 만든다.
             macro_app = MCPApp(name="macro_intelligence")
 
             async with macro_app.run() as macro_run_context:
                 macro_logger = macro_run_context.logger
                 macro_logger.info("Macro intelligence agent starting (perplexity-only mode)...")
 
+                # Agent 정의: 이름, 지침(instruction), 사용할 도구 목록(server_names) 지정
                 agent = create_macro_intelligence_agent(reference_date, language, prefetched_data=prefetched)
 
                 from mcp_agent.workflows.llm.augmented_llm import RequestParams
+                # LLM 연결 및 태스크 실행
                 llm = await agent.attach_llm(OpenAIAugmentedLLM)
                 result = await llm.generate_str(
                     message=f"{reference_date} 기준 한국 주식시장 거시경제 분석을 수행하고 JSON으로 출력하세요.",
@@ -349,7 +352,7 @@ class StockAnalysisOrchestrator:
 
                 # Save raw output for debugging
                 try:
-                    raw_output_path = f"macro_intelligence_kr_{reference_date}.json"
+                    raw_output_path = f"logs/macro_intelligence_kr_{reference_date}.json"
                     with open(raw_output_path, 'w', encoding='utf-8') as f:
                         f.write(result)
                     macro_logger.info(f"Raw output saved to: {raw_output_path}")
@@ -433,7 +436,7 @@ class StockAnalysisOrchestrator:
             from trigger_batch import run_batch
 
             # Results file path
-            results_file = f"trigger_results_{mode}_{datetime.now().strftime('%Y%m%d')}.json"
+            results_file = f"logs/trigger_results_{mode}_{datetime.now().strftime('%Y%m%d')}.json"
 
             # Run batch directly (synchronous call in async context)
             # run_batch is CPU-bound, so running it directly is acceptable
@@ -1070,7 +1073,7 @@ class StockAnalysisOrchestrator:
                 logger.warning("Macro intelligence unavailable - proceeding without macro context")
 
             # 1. Execute trigger batch - changed to async method (improved asyncio resource management)
-            results_file = f"trigger_results_{mode}_{datetime.now().strftime('%Y%m%d')}.json"
+            results_file = f"logs/trigger_results_{mode}_{datetime.now().strftime('%Y%m%d')}.json"
             tickers = await self.run_trigger_batch(mode, macro_context=macro_context)
 
             if not tickers:

@@ -637,11 +637,15 @@ def trigger_morning_value_to_cap_ratio(trade_date: str, snapshot: pd.DataFrame, 
 # --- Afternoon trigger functions (based on market close snapshot) ---
 def trigger_afternoon_daily_rise_top(trade_date: str, snapshot: pd.DataFrame, prev_snapshot: pd.DataFrame, cap_df: pd.DataFrame = None, top_n: int = 15) -> pd.DataFrame:
     """
-    [Afternoon Trigger 1] Top intraday rise stocks
-    - Absolute criteria: Minimum trade value 1B KRW or more
-    - Composite score: Intraday rise (60%) + Trade value (40%)
-    - Additional filter: Change rate 3% or more
-    - Penny stock filter: Market cap 50B KRW or more
+    [Afternoon Trigger 1] 일중상승률 상위주(Top intraday rise stocks)
+    - Absolute criteria:
+        거래대금 100억 이상, 거래량 시장평균 20% 이상
+    - Additional filter:
+        3% ≤전일대비등락률 ≤ 15%
+    - Penny stock filter:
+        시가총액 5,000억 이상
+    - Composite score:
+        Intraday rise (60%) + Trade value (40%)
     """
     logger.debug("trigger_afternoon_daily_rise_top started")
 
@@ -654,20 +658,21 @@ def trigger_afternoon_daily_rise_top(trade_date: str, snapshot: pd.DataFrame, pr
     if cap_df is not None and not cap_df.empty:
         snap = snap.merge(cap_df[["시가총액"]], left_index=True, right_index=True, how="inner")
         # Select stocks with market cap 500B KRW or more (v1.16.6: expanded opportunity pool, 518 stocks)
-        snap = snap[snap["시가총액"] >= 500000000000]
+        snap = snap[snap["시가총액"] >= 500000000000]  # 시가총액 5천억 이상
         logger.debug(f"Stock count after market cap filtering: {len(snap)}")
         if snap.empty:
             logger.warning("No stocks after market cap filtering")
             return pd.DataFrame()
 
     # Apply absolute criteria (raised to 10B KRW trade value)
+    #  거래대금 100억원 이상, 거래량 시장평균 20% 이상
     snap = apply_absolute_filters(snap.copy(), min_value=10000000000)
 
-    # Calculate two types of change rates
+    # Calculate two types of change rates - 일중등락률, 전일대비등락률
     snap["intraday_change_rate"] = (snap["Close"] / snap["Open"] - 1) * 100  # Current vs opening price
     snap["prev_day_change_rate"] = ((snap["Close"] - prev["Close"]) / prev["Close"]) * 100  # Same as brokerage app
 
-    # Change rate filter: 3% or more, 20% or less (v1.16.6: surge stocks can enter)
+    # Change rate filter: 3% or more, 15% or less (v1.16.6: surge stocks can enter)
     snap = snap[(snap["prev_day_change_rate"] >= 3.0) & (snap["prev_day_change_rate"] <= 15.0)]
 
     if snap.empty:
@@ -685,11 +690,15 @@ def trigger_afternoon_daily_rise_top(trade_date: str, snapshot: pd.DataFrame, pr
 
 def trigger_afternoon_closing_strength(trade_date: str, snapshot: pd.DataFrame, prev_snapshot: pd.DataFrame, cap_df: pd.DataFrame = None, top_n: int = 15) -> pd.DataFrame:
     """
-    [Afternoon Trigger 2] Top closing strength stocks
-    - Absolute criteria: Minimum trade value 500M KRW + volume increase vs previous day
+    [Afternoon Trigger 2] 마감강도상위주(Top closing strength stocks) 10개 종목 선별
+    - Absolute criteria:
+        거래대금 100억 이상 + 거래량 시장평균 20% 이상
+        전일대비등락률 20% 이하 + 전일대비 거래량 증가
+    - Secondary filtering:
+        당일 양봉
+    - Penny stock filter:
+        시가총액 5,000억 이상
     - Composite score: Closing strength (50%) + Volume increase rate (30%) + Trade value (20%)
-    - Secondary filtering: Select only rising stocks (close > open)
-    - Penny stock filter: Market cap 50B KRW or more
     """
     logger.debug("trigger_afternoon_closing_strength started")
     common = snapshot.index.intersection(prev_snapshot.index)
@@ -700,13 +709,14 @@ def trigger_afternoon_closing_strength(trade_date: str, snapshot: pd.DataFrame, 
     if cap_df is not None and not cap_df.empty:
         snap = snap.merge(cap_df[["시가총액"]], left_index=True, right_index=True, how="inner")
         # Select stocks with market cap 500B KRW or more (v1.16.6: expanded opportunity pool, 518 stocks)
-        snap = snap[snap["시가총액"] >= 500000000000]
+        snap = snap[snap["시가총액"] >= 500000000000]  # 시가총액 5천억 이상
         logger.debug(f"Stock count after market cap filtering: {len(snap)}")
         if snap.empty:
             logger.warning("No stocks after market cap filtering")
             return pd.DataFrame()
 
     # Apply absolute criteria (raised to 10B KRW trade value)
+    #  거래대금 100억 이상 + 거래량 시장평균 20% 이상
     snap = apply_absolute_filters(snap, min_value=10000000000)
 
     # Calculate closing strength (closer to high = closer to 1)
@@ -1299,6 +1309,7 @@ def run_batch(trigger_time: str, log_level: str = "INFO", output_file: str = Non
     trade_date = stock_api.get_nearest_business_day_in_a_week(today_str, prev=True)
     logger.info(f"Batch reference trading date: {trade_date}")
 
+    # OHLCV snapshot for all stocks on specified trading date
     try:
         snapshot = get_snapshot(trade_date)
     except ValueError as e:
