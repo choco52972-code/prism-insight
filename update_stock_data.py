@@ -13,11 +13,7 @@ import logging
 import argparse
 from datetime import datetime
 
-try:
-    from krx_data_client import _get_client
-except ImportError:
-    print("krx_data_client package is not installed. Install with 'pip install kospi-kosdaq-stock-server'.")
-    exit(1)
+from cores.krx_mcp_client import load_all_tickers
 
 # Logging configuration
 logging.basicConfig(
@@ -45,12 +41,9 @@ def update_stock_data(output_file="stock_map.json"):
         today = datetime.now().strftime("%Y%m%d")
         logger.info(f"Starting stock data update: {today}")
 
-        # Initialize client
-        client = _get_client()
-
         # Fetch all stock code-name mappings at once (efficient!)
         logger.info("Fetching all stock information...")
-        code_to_name = client.get_market_ticker_name(market="ALL")
+        code_to_name = load_all_tickers()
         logger.info(f"Loaded {len(code_to_name)} stocks")
 
         # Create reverse mapping

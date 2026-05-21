@@ -58,6 +58,7 @@ if _CREATED_TEST_CONFIG:
 from tracking import db_schema as kr_schema
 from tracking import helpers as kr_helpers
 from trading import domestic_stock_trading as dst
+from trading.brokers.kis import trading as _dst_impl
 
 
 class FakeDomesticTrader:
@@ -129,6 +130,7 @@ class FakeDomesticTrader:
 async def test_async_trading_context_returns_single_account_trader(monkeypatch):
     FakeDomesticTrader.init_calls = []
     monkeypatch.setattr(dst, "DomesticStockTrading", FakeDomesticTrader)
+    monkeypatch.setattr(_dst_impl, "DomesticStockTrading", FakeDomesticTrader)
 
     async with dst.AsyncTradingContext(mode="demo", buy_amount=150000, account_name="kr-main") as trader:
         assert isinstance(trader, FakeDomesticTrader)
@@ -153,6 +155,7 @@ async def test_multi_account_trading_context_fans_out_orders_but_reads_primary(m
         {"name": "kr-secondary", "account_key": "vps:kr-secondary:01", "product": "01"},
     ]
     monkeypatch.setattr(dst, "DomesticStockTrading", FakeDomesticTrader)
+    monkeypatch.setattr(_dst_impl, "DomesticStockTrading", FakeDomesticTrader)
     monkeypatch.setattr(dst.ka, "get_configured_accounts", lambda **kwargs: accounts)
     monkeypatch.setattr(dst.ka, "resolve_account", lambda **kwargs: accounts[0])
 

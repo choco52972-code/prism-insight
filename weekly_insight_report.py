@@ -149,7 +149,7 @@ def _get_sell_evaluation(cursor, week_start_str: str) -> str | None:
     # KR: batch lookup via pykrx (single call for all tickers)
     if kr_sells:
         try:
-            from krx_data_client import get_nearest_business_day_in_a_week, get_market_ohlcv_by_ticker
+            from cores.krx_mcp_client import get_nearest_business_day_in_a_week, get_market_ohlcv_by_ticker
             today_str = datetime.now().strftime("%Y%m%d")
             trade_date = get_nearest_business_day_in_a_week(today_str, prev=True)
             df = get_market_ohlcv_by_ticker(trade_date)

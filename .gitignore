@@ -48,6 +48,13 @@ trading/config/*.token*
 trading/config/*.key
 trading/config/kis_devlp.yaml
 trading/config/kis_*.yaml
+trading/brokers/kis/config/kis_devlp.yaml
+trading/brokers/kis/config/kis_config.yaml
+trading/brokers/kis/config/*.token*
+trading/brokers/kis/config/.token_key
+trading/brokers/kis_original/config/kis_devlp.yaml
+trading/brokers/kis_original/config/*.token*
+trading/brokers/kis_original/config/.token_key
 
 # Build artifacts
 .next/

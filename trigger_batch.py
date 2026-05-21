@@ -8,7 +8,7 @@ import datetime
 import pandas as pd
 import numpy as np
 import logging
-from krx_data_client import (
+from cores.krx_mcp_client import (
     get_market_ohlcv_by_ticker,
     get_nearest_business_day_in_a_week,
     get_market_cap_by_ticker,
@@ -92,7 +92,7 @@ def get_multi_day_ohlcv(ticker: str, end_date: str, days: int = 10) -> pd.DataFr
         DataFrame with columns: Open, High, Low, Close, Volume, Amount
         Index: Date
     """
-    from krx_data_client import get_market_ohlcv_by_date
+    from cores.krx_mcp_client import get_market_ohlcv_by_date
 
     # Calculate sufficient past date from end date (with margin for business days)
     end_dt = datetime.datetime.strptime(end_date, '%Y%m%d')
@@ -100,7 +100,7 @@ def get_multi_day_ohlcv(ticker: str, end_date: str, days: int = 10) -> pd.DataFr
     start_date = start_dt.strftime('%Y%m%d')
 
     try:
-        df = get_market_ohlcv_by_date(start_date, end_date, ticker)
+        df = get_market_ohlcv_by_date(start_date, end_date, ticker, adjusted=False)
         if df.empty:
             logger.warning(f"No {days}-day data for {ticker}.")
             return pd.DataFrame()
@@ -962,7 +962,7 @@ def trigger_contrarian_value(trade_date: str, snapshot: pd.DataFrame,
     - Scores on drawdown magnitude, liquidity, low P/B ratio, and daily recovery
     - Uses krx_data_client for 52-week high and fundamental data
     """
-    from krx_data_client import get_market_ohlcv_by_date, get_market_fundamental_by_date
+    from cores.krx_mcp_client import get_market_ohlcv_by_date, get_market_fundamental_by_date
 
     logger.debug("trigger_contrarian_value started")
 
@@ -994,7 +994,7 @@ def trigger_contrarian_value(trade_date: str, snapshot: pd.DataFrame,
     for i, ticker in enumerate(candidates.index):
         logger.debug(f"trigger_contrarian_value: fetching data for {ticker} ({i+1}/{len(candidates)})")
         try:
-            hist = get_market_ohlcv_by_date(start_date_str, trade_date, ticker)
+            hist = get_market_ohlcv_by_date(start_date_str, trade_date, ticker, adjusted=False)
             if hist.empty:
                 continue
             high_52w = float(hist["High"].max())

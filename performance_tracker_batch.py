@@ -37,16 +37,11 @@ logger = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).parent
 DB_PATH = PROJECT_ROOT / "stock_tracking_db.sqlite"
 
-# krx_data_client import
-try:
-    from krx_data_client import (
-        get_market_ohlcv_by_date,
-        get_nearest_business_day_in_a_week,
-    )
-    KRX_AVAILABLE = True
-except ImportError:
-    KRX_AVAILABLE = False
-    logger.warning("krx_data_client package is not installed.")
+from cores.krx_mcp_client import (
+    get_market_ohlcv_by_date,
+    get_nearest_business_day_in_a_week,
+)
+KRX_AVAILABLE = True
 
 
 class PerformanceTrackerBatch:

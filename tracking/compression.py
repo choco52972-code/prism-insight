@@ -232,7 +232,7 @@ class CompressionManager:
         Returns empty dict on failure — compression proceeds without hindsight.
         """
         try:
-            from krx_data_client import get_nearest_business_day_in_a_week, get_market_ohlcv_by_ticker
+            from cores.krx_mcp_client import get_nearest_business_day_in_a_week, get_market_ohlcv_by_ticker
             import datetime as dt
 
             today = dt.datetime.now().strftime("%Y%m%d")

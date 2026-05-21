@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 KRX API Test Script
-Verifies that krx_data_client works properly on the server.
+Verifies that krx_mcp_client works properly (via kospi_kosdaq MCP server).
 """
 import datetime
 import sys
@@ -14,7 +14,7 @@ load_dotenv(env_path)
 
 def main():
     print("=" * 60)
-    print("KRX API Test")
+    print("KRX API Test (via MCP)")
     print("=" * 60)
 
     today = datetime.datetime.now().strftime('%Y%m%d')
@@ -27,14 +27,12 @@ def main():
 
     # Import after printing basic info
     try:
-        from krx_data_client import (
+        from cores.krx_mcp_client import (
             get_nearest_business_day_in_a_week,
             get_market_ohlcv_by_ticker,
             get_index_ohlcv_by_date
         )
-        import pkg_resources
-        version = pkg_resources.get_distribution('kospi-kosdaq-stock-server').version
-        print(f'kospi-kosdaq-stock-server version: {version}')
+        print('krx_mcp_client imported successfully')
         print()
     except Exception as e:
         print(f'Import error: {e}')
@@ -76,7 +74,8 @@ def main():
         df = get_market_ohlcv_by_ticker(trade_date)
         print(f'Rows: {len(df)}')
         if '005930' in df.index:
-            print(f'Samsung (005930) close: {df.loc["005930", "종가"]:,.0f}')
+            close_col = "Close" if "Close" in df.columns else "종가"
+            print(f'Samsung (005930) close: {df.loc["005930", close_col]:,.0f}')
         print('Status: SUCCESS')
     except Exception as e:
         print(f'Error: {e}')

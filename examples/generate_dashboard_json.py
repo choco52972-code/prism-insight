@@ -39,7 +39,7 @@ sys.path.insert(0, str(TRADING_DIR))
 
 # krx_data_client import for market index data
 try:
-    from krx_data_client import get_index_ohlcv_by_date
+    from cores.krx_mcp_client import get_index_ohlcv_by_date
 
     # pykrx compatibility wrapper
     class stock:

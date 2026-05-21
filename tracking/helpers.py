@@ -60,7 +60,7 @@ async def get_current_stock_price(cursor, ticker: str, account_key: str | None =
         float: Current stock price
     """
     try:
-        from krx_data_client import get_nearest_business_day_in_a_week, get_market_ohlcv_by_ticker
+        from cores.krx_mcp_client import get_nearest_business_day_in_a_week, get_market_ohlcv_by_ticker
         import datetime
 
         today = datetime.datetime.now().strftime("%Y%m%d")
@@ -117,7 +117,7 @@ async def get_trading_value_rank_change(ticker: str) -> Tuple[float, str]:
         Tuple[float, str]: Ranking change percentage, analysis result message
     """
     try:
-        from krx_data_client import get_nearest_business_day_in_a_week, get_market_ohlcv_by_ticker
+        from cores.krx_mcp_client import get_nearest_business_day_in_a_week, get_market_ohlcv_by_ticker
         import datetime
 
         today = datetime.datetime.now().strftime("%Y%m%d")

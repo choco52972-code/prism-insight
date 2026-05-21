@@ -402,8 +402,7 @@ def create_mpf_style(base_mpl_style='seaborn-v0_8-whitegrid'):
 
     return s
 
-# Import functions from krx_data_client (pykrx compatible)
-from krx_data_client import (
+from cores.krx_mcp_client import (
     get_market_ohlcv_by_date,
     get_market_cap_by_date,
     get_market_fundamental_by_date,
@@ -411,7 +410,7 @@ from krx_data_client import (
     get_market_trading_value_by_investor,
     get_market_trading_volume_by_date,
     get_market_trading_value_by_date,
-    get_market_ticker_name
+    get_market_ticker_name,
 )
 
 # Professional chart style configuration
@@ -524,11 +523,18 @@ def create_price_chart(ticker, company_name=None, days=730, save_path=None, adju
     title = f"{company_name} ({ticker}) - Price Chart"
 
     # Configure moving average overlay plots
-    additional_plots = [
-        mpf.make_addplot(df['MA20'], color='#ff9500', width=1),  # 20-day MA (orange)
-        mpf.make_addplot(df['MA60'], color='#0066cc', width=1.5),  # 60-day MA (blue)
-        mpf.make_addplot(df['MA120'], color='#cc3300', width=1.5, linestyle='--'),  # 120-day MA (red, dashed)
+    # Skip all-NaN MA series (e.g. newly listed stocks with fewer trading days than the window)
+    _ma_configs = [
+        (df['MA20'],  '#ff9500', 1,   {},                  'MA20'),
+        (df['MA60'],  '#0066cc', 1.5, {},                  'MA60'),
+        (df['MA120'], '#cc3300', 1.5, {'linestyle': '--'}, 'MA120'),
     ]
+    additional_plots = []
+    ma_labels = []
+    for _ma_series, _color, _width, _kwargs, _label in _ma_configs:
+        if _ma_series.notna().any():
+            additional_plots.append(mpf.make_addplot(_ma_series, color=_color, width=_width, **_kwargs))
+            ma_labels.append(_label)
 
     if KOREAN_FONT_PATH:
         # Apply Korean font to mplfinance charts
@@ -564,7 +570,8 @@ def create_price_chart(ticker, company_name=None, days=730, save_path=None, adju
     ax1, ax2 = axes[0], axes[2]
 
     # Add legend for moving averages
-    ax1.legend(['MA20', 'MA60', 'MA120'], loc='upper left')
+    if ma_labels:
+        ax1.legend(ma_labels, loc='upper left')
 
     # Identify key price points for annotation
     max_point = df['Close'].idxmax()  # Highest closing price date

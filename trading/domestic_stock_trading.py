@@ -1,17 +1,19 @@
 """
-Compatibility shim — re-exports from kis_original until migration completes.
+Compatibility shim — re-exports from kis broker package.
 All callers using `from trading.domestic_stock_trading import ...` continue to work unchanged.
 """
-from trading.brokers.kis_original.domestic_stock_trading import (
+from trading.brokers.kis import (
     DomesticStockTrading,
     MultiAccountDomesticStockTrading,
     AsyncTradingContext,
     MultiAccountTradingContext,
 )
+import kis_auth as ka
 
 __all__ = [
     "DomesticStockTrading",
     "MultiAccountDomesticStockTrading",
     "AsyncTradingContext",
     "MultiAccountTradingContext",
+    "ka",
 ]

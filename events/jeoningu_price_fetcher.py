@@ -6,7 +6,7 @@ Fetches current prices for KODEX Leverage and KODEX Inverse 2X
 from dotenv import load_dotenv
 load_dotenv()  # Load environment variables from .env file
 
-from krx_data_client import (
+from cores.krx_mcp_client import (
     get_index_ohlcv_by_date,
     get_market_ohlcv_by_date,
 )

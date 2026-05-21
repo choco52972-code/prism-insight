@@ -26,8 +26,7 @@ from .factory import (
 )
 
 # Legacy: `from trading import kis_auth as ka`
-# Exposes the real kis_original module as a trading-package attribute.
-from .brokers.kis_original import kis_auth  # noqa: F401
+from .brokers.kis import kis_auth  # noqa: F401
 
 # 설정 관리자 (선택적)
 try:

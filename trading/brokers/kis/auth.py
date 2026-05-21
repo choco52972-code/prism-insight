@@ -1,6 +1,5 @@
 """
 KIS Broker Authentication
-Delegates all real operations to trading.brokers.kis_original.kis_auth.
 Implements BaseAuth abstract interface and exposes the full KisAuth legacy API.
 """
 
@@ -14,8 +13,8 @@ logger = logging.getLogger(__name__)
 
 
 def _get_ka():
-    """Return the real kis_auth module (kis_original)."""
-    import trading.brokers.kis_original.kis_auth as ka
+    """Return the real kis_auth module."""
+    from trading.brokers.kis import kis_auth as ka
     return ka
 
 
@@ -30,7 +29,7 @@ class KISAccount:
 
 
 class KISAuth(BaseAuth):
-    """KIS 브로커 인증 — kis_original/kis_auth.py 에 위임"""
+    """KIS 브로커 인증"""
 
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         super().__init__(config or {})
@@ -117,7 +116,7 @@ class KISAuth(BaseAuth):
 
 class KisAuth(KISAuth):
     """
-    Backward-compatible alias — mirrors the full kis_original kis_auth module API.
+    Backward-compatible alias.
     Callers using `ka = KisAuth(...)` or `from trading.brokers.kis.auth import KisAuth as ka`
     can call ka.getEnv(), ka.get_configured_accounts(), ka.changeTREnv(), etc.
     """
@@ -148,7 +147,7 @@ class KisAuth(KISAuth):
     @staticmethod
     def changeTREnv(token_key, svr="prod", product=None, account_name=None,
                     account_index=None, account_key=None) -> None:
-        from trading.brokers.kis_original.kis_auth import DEFAULT_PRODUCT_CODE
+        from trading.brokers.kis.kis_auth import DEFAULT_PRODUCT_CODE
         return _get_ka().changeTREnv(
             token_key, svr=svr, product=product or DEFAULT_PRODUCT_CODE,
             account_name=account_name, account_index=account_index,
@@ -174,7 +173,7 @@ class KisAuth(KISAuth):
     @staticmethod
     def auth(svr="prod", product=None, url=None, account_name=None,
              account_index=None, account_key=None) -> None:
-        from trading.brokers.kis_original.kis_auth import DEFAULT_PRODUCT_CODE
+        from trading.brokers.kis.kis_auth import DEFAULT_PRODUCT_CODE
         return _get_ka().auth(
             svr=svr, product=product or DEFAULT_PRODUCT_CODE, url=url,
             account_name=account_name, account_index=account_index,
@@ -184,7 +183,7 @@ class KisAuth(KISAuth):
     @staticmethod
     def reAuth(svr="prod", product=None, account_name=None,
                account_index=None, account_key=None) -> None:
-        from trading.brokers.kis_original.kis_auth import DEFAULT_PRODUCT_CODE
+        from trading.brokers.kis.kis_auth import DEFAULT_PRODUCT_CODE
         return _get_ka().reAuth(
             svr=svr, product=product or DEFAULT_PRODUCT_CODE,
             account_name=account_name, account_index=account_index,
@@ -200,7 +199,7 @@ class KisAuth(KISAuth):
         return _get_ka().smart_sleep()
 
 
-# Lazily re-export exception/response types from kis_original so callers can do:
+# Lazily re-export exception/response types so callers can do:
 #   from trading.brokers.kis.auth import KISAuthError
 def __getattr__(name: str):
     _re_exports = {
