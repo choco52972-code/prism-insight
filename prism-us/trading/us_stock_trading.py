@@ -33,10 +33,12 @@ import pytz
 TRADING_DIR = Path(__file__).parent
 PROJECT_ROOT = TRADING_DIR.parent.parent
 
-# Import KIS auth from parent trading directory
+# Import KIS auth from trading/brokers/kis/ (moved from trading/ in KIS broker porting)
 import sys
-sys.path.insert(0, str(PROJECT_ROOT / "trading"))
-import kis_auth as ka
+import importlib.util as _importlib_util
+_kis_auth_spec = _importlib_util.spec_from_file_location("kis_auth", PROJECT_ROOT / "trading/brokers/kis/kis_auth.py")
+ka = _importlib_util.module_from_spec(_kis_auth_spec)
+_kis_auth_spec.loader.exec_module(ka)
 
 # Logging setup
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -48,7 +50,7 @@ with open(CONFIG_FILE, encoding="UTF-8") as f:
     _cfg = yaml.safe_load(f)
 
 # Timezones
-US_EASTERN = pytz.timezone('US/Eastern')
+US_EASTERN = pytz.timezone('America/New_York')
 KST = pytz.timezone('Asia/Seoul')
 
 
