@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 # _domestic.py imports `kis_auth as ka` at module level; pre-registering here
 # ensures it always gets the real implementation.
 try:
-    from trading.brokers.kis import kis_auth as _real_kis_auth
+    from . import kis_auth as _real_kis_auth
     sys.modules['kis_auth'] = _real_kis_auth
     logger.debug("kis_auth registered → trading.brokers.kis.kis_auth")
 except Exception as _e:
