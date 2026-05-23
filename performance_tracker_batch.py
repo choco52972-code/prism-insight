@@ -22,19 +22,21 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional, Tuple
 from pathlib import Path
 
+# Project root path
+PROJECT_ROOT = Path(__file__).parent
+LOGS_DIR = PROJECT_ROOT / "logs"
+
 # Logging setup
+LOGS_DIR.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler(f"performance_tracker_{datetime.now().strftime('%Y%m%d')}.log")
+        logging.FileHandler(LOGS_DIR / f"performance_tracker_{datetime.now().strftime('%Y%m%d')}.log")
     ]
 )
 logger = logging.getLogger(__name__)
-
-# Project root path
-PROJECT_ROOT = Path(__file__).parent
 DB_PATH = PROJECT_ROOT / "stock_tracking_db.sqlite"
 
 from cores.krx_mcp_client import (

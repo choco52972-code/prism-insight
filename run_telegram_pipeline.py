@@ -13,6 +13,7 @@ import os
 import sys
 import traceback
 from datetime import datetime
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -20,12 +21,14 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Logging configuration
+_LOGS_DIR = Path(__file__).parent / "logs"
+_LOGS_DIR.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler(f"telegram_pipeline_{datetime.now().strftime('%Y%m%d')}.log")
+        logging.FileHandler(_LOGS_DIR / f"telegram_pipeline_{datetime.now().strftime('%Y%m%d')}.log")
     ]
 )
 logger = logging.getLogger(__name__)

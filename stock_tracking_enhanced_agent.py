@@ -2,6 +2,7 @@ from dotenv import load_dotenv
 load_dotenv()  # Load environment variables from .env file
 
 import numpy as np
+from pathlib import Path
 from scipy import stats
 from typing import List, Tuple, Dict, Any
 from datetime import datetime, timedelta
@@ -18,12 +19,14 @@ from cores.llm.openai_responses_llm import OpenAIResponsesLLM as OpenAIAugmented
 from cores.agents.trading_agents import create_sell_decision_agent
 from cores.utils import parse_llm_json
 
+_LOGS_DIR = Path(__file__).parent / "logs"
+_LOGS_DIR.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler(f"enhanced_stock_tracking_{datetime.now().strftime('%Y%m%d')}.log")
+        logging.FileHandler(_LOGS_DIR / f"enhanced_stock_tracking_{datetime.now().strftime('%Y%m%d')}.log")
     ]
 )
 logger = logging.getLogger(__name__)

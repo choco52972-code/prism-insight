@@ -26,12 +26,15 @@ from pathlib import Path
 from cores.openai_error_logging import log_openai_error
 
 # Logger configuration
+_PROJECT_ROOT = Path(__file__).parent
+_LOGS_DIR = _PROJECT_ROOT / "logs"
+_LOGS_DIR.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler(f"orchestrator_{datetime.now().strftime('%Y%m%d')}.log")
+        logging.FileHandler(_LOGS_DIR / f"orchestrator_{datetime.now().strftime('%Y%m%d')}.log")
     ]
 )
 logger = logging.getLogger(__name__)

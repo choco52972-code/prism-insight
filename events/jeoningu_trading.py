@@ -43,7 +43,7 @@ DATA_DIR = Path(__file__).parent
 SECRETS_DIR = Path(__file__).parent.parent
 
 # Output directories - organize outputs in subdirectories
-LOGS_DIR = DATA_DIR / "logs"
+LOGS_DIR = Path(__file__).parent.parent / "logs"
 TRANSCRIPTS_DIR = DATA_DIR / "transcripts"
 AUDIO_TEMP_DIR = DATA_DIR / "audio_temp"
 

@@ -50,13 +50,15 @@ load_dotenv()
 
 # Logger setup
 from logging.handlers import RotatingFileHandler
+_LOGS_DIR = Path(__file__).parent / "logs"
+_LOGS_DIR.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
         RotatingFileHandler(
-            f"ai_bot_{datetime.now().strftime('%Y%m%d')}.log",
+            _LOGS_DIR / f"ai_bot_{datetime.now().strftime('%Y%m%d')}.log",
             maxBytes=10*1024*1024,  # 10MB
             backupCount=5
         )

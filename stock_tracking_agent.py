@@ -31,12 +31,14 @@ from telegram import Bot
 from telegram.error import TelegramError, TimedOut, RetryAfter
 
 # Logging configuration
+_LOGS_DIR = Path(__file__).parent / "logs"
+_LOGS_DIR.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler(f"stock_tracking_{datetime.now().strftime('%Y%m%d')}.log")
+        logging.FileHandler(_LOGS_DIR / f"stock_tracking_{datetime.now().strftime('%Y%m%d')}.log")
     ]
 )
 logger = logging.getLogger(__name__)

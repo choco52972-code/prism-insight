@@ -48,14 +48,19 @@ import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
+# Project root path
+PROJECT_ROOT = Path(__file__).parent
+LOGS_DIR = PROJECT_ROOT / "logs"
+
 # Configure logging
+LOGS_DIR.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
         logging.FileHandler(
-            f"compression_{datetime.now().strftime('%Y%m%d')}.log",
+            LOGS_DIR / f"compression_{datetime.now().strftime('%Y%m%d')}.log",
             encoding='utf-8'
         )
     ]

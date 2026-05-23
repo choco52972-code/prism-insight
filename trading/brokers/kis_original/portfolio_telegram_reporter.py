@@ -47,19 +47,22 @@ except ImportError as e:
     US_TRADING_AVAILABLE = False
 
 # Logging configuration
+_PROJECT_ROOT = SCRIPT_DIR.parent.parent.parent  # trading/brokers/kis_original/ -> prism-insight/
+_LOGS_DIR = _PROJECT_ROOT / "logs"
+_LOGS_DIR.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(SCRIPT_DIR / 'portfolio_reporter.log'),
+        logging.FileHandler(_LOGS_DIR / 'portfolio_reporter.log'),
         logging.StreamHandler()
     ]
 )
 logger = logging.getLogger(__name__)
 
 # Load .env file
-SCRIPT_DIR = Path(__file__).parent.absolute()  # trading/
-PROJECT_ROOT = SCRIPT_DIR.parent              # project_root/
+SCRIPT_DIR = Path(__file__).parent.absolute()  # trading/brokers/kis_original/
+PROJECT_ROOT = SCRIPT_DIR.parent.parent.parent  # prism-insight/
 ENV_FILE = PROJECT_ROOT / ".env"
 load_dotenv(dotenv_path=str(ENV_FILE))
 

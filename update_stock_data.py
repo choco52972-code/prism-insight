@@ -12,16 +12,19 @@ import json
 import logging
 import argparse
 from datetime import datetime
+from pathlib import Path
 
 from cores.krx_mcp_client import load_all_tickers
 
 # Logging configuration
+_LOGS_DIR = Path(__file__).parent / "logs"
+_LOGS_DIR.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler("stock_data_update.log")
+        logging.FileHandler(_LOGS_DIR / "stock_data_update.log")
     ]
 )
 logger = logging.getLogger(__name__)

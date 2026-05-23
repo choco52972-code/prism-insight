@@ -29,12 +29,14 @@ sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PRISM_US_DIR))
 
 # Logging setup
+_LOGS_DIR = PROJECT_ROOT / "logs"
+_LOGS_DIR.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler(PRISM_US_DIR / f"us_performance_tracker_{datetime.now().strftime('%Y%m%d')}.log")
+        logging.FileHandler(_LOGS_DIR / f"us_performance_tracker_{datetime.now().strftime('%Y%m%d')}.log")
     ]
 )
 logger = logging.getLogger(__name__)
