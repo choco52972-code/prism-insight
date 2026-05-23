@@ -80,9 +80,6 @@ perplexity-ask/
 docs/GEEKNEWS_POST_FINAL.md
 docs/TELEGRAM_JOURNAL_GUIDE.md
 
-# Python virtual environment
-venv/
-
 # Logs directory
 logs/
 
@@ -123,8 +120,3 @@ id_ed25519*
 archive.db
 archive.db-shm
 archive.db-wal
-
-# 환경 변수 파일 (개인정보)
-.env
-.env.*
-!.env.example

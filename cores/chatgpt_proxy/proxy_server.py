@@ -89,7 +89,6 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
         "Content-Type": "application/json",
         "OpenAI-Beta": "responses=experimental",
         "accept": "text/event-stream",
-        "Accept-Encoding": "gzip, deflate",
     }
     if account_id:
         headers["chatgpt-account-id"] = account_id

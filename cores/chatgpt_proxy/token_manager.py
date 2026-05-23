@@ -88,10 +88,7 @@ class TokenManager:
             async with session.post(
                 OAUTH_TOKEN_URL,
                 data=token_data,
-                headers={
-                    "Content-Type": "application/x-www-form-urlencoded",
-                    "Accept-Encoding": "gzip, deflate"
-                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
             ) as resp:
                 if resp.status != 200:
                     body = await resp.text()

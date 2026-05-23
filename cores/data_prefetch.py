@@ -55,11 +55,6 @@ def _get_mcp_server_module():
         The kospi_kosdaq_stock_server module, or None if import fails
     """
     try:
-        # sys.path에 새 경로 추가
-        import sys
-        new_server_path = "/home/leedw/projects/kospi-kosdaq-stock-server"
-        if new_server_path not in sys.path:
-            sys.path.insert(0, new_server_path)
         import kospi_kosdaq_stock_server as server
         return server
     except ImportError:

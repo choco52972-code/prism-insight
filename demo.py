@@ -24,8 +24,6 @@ from pathlib import Path
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(project_root / "prism-us"))
-# Add parent directory for mcp_agent module
-sys.path.insert(0, str(project_root.parent))
 
 # Import us_analysis module dynamically (prism-us has hyphen in name)
 import importlib.util
@@ -75,143 +73,8 @@ async def generate_report(ticker: str, company_name: str, language: str = "ko") 
     Returns:
         tuple: (markdown_path, pdf_path)
     """
-    # Ensure project root is in sys.path for cores imports (중복 추가 방지)
-    import logging
-    import sys
-    from pathlib import Path
-    print(f"GENERATE_REPORT DEBUG: __file__ = {__file__}")
-    print(f"GENERATE_REPORT DEBUG: Path(__file__).parent = {Path(__file__).parent}")
-    print(f"GENERATE_REPORT DEBUG: sys.path before = {sys.path}")
-    project_root = Path(__file__).parent
-    if str(project_root) not in sys.path:
-        sys.path.insert(0, str(project_root))
-    
     from report_generator import save_us_report, save_us_pdf_report
 
-    # 프록시 모드 확인
-    logging.basicConfig(level=logging.DEBUG)
-    import os
-    proxy_mode = os.getenv("PRISM_OPENAI_AUTH_MODE", "")
-    print(f"DEBUG: proxy_mode = '{proxy_mode}'")
-    
-    if proxy_mode == "vibeconduit":
-        print("=== VibeConduit 프록시 설정 ===")
-        os.environ["OPENAI_BASE_URL"] = "http://localhost:8317/v1"
-        os.environ["OPENAI_API_KEY"] = ""
-        print(f"   OPENAI_BASE_URL={os.environ.get('OPENAI_BASE_URL')}")
-        print("   OPENAI_API_KEY=***")
-    elif proxy_mode == "chatgpt_oauth" or proxy_mode == "claude_oauth":
-        try:
-            # Add project root to sys.path for this import (중요!)
-            project_root = Path(__file__).parent
-            if str(project_root) not in sys.path:
-                sys.path.insert(0, str(project_root))
-            
-            print(f"DEBUG: sys.path = {sys.path}")
-            print(f"DEBUG: 프로젝트 루트 = {project_root}")
-            print(f"DEBUG: Checking cores directory at {project_root}/cores")
-            
-            # 프록시 모드에 따라 모듈 이름 결정
-            if proxy_mode == "chatgpt_oauth":
-                proxy_module_name = "cores.chatgpt_proxy"
-                proxy_port = 18741
-                proxy_name = "ChatGPT OAuth"
-            else:  # claude_oauth
-                proxy_module_name = "cores.claude_proxy"
-                proxy_port = 18742
-                proxy_name = "Claude OAuth"
-            
-            # importlib를 사용하여 모듈 로드
-            import importlib.util
-            import sys
-            import os
-            
-            # 모듈 경로 구성
-            module_path = os.path.join(str(project_root), "cores", proxy_module_name.split(".")[1], "__init__.py")
-            print(f"DEBUG: Trying to load proxy module from: {module_path}")
-            print(f"DEBUG: Module path exists: {os.path.exists(module_path)}")
-            
-            # 명시적으로 모듈 로드
-            spec = importlib.util.spec_from_file_location(proxy_module_name, module_path)
-            proxy = importlib.util.module_from_spec(spec)
-            sys.modules[proxy_module_name] = proxy
-            spec.loader.exec_module(proxy)
-            
-            # 함수 추출
-            inject_env = proxy.inject_env
-            start_proxy = proxy.start_proxy
-            clear_env = proxy.clear_env
-            
-            print(f"=== {proxy_name} 프록시 설정 ===")
-            
-            # 1. 환경 변수 강제 설정 (mcp_agent가 이를 사용하도록)
-            inject_env()
-            print("✅ 환경 변수 설정:")
-            print(f"   OPENAI_BASE_URL={os.environ.get('OPENAI_BASE_URL')}")
-            if os.environ.get('OPENAI_API_KEY'):
-        print("   OPENAI_API_KEY=***")
-            else:
-                print("   OPENAI_API_KEY=(empty)")
-            
-            # 2. 프록시 서버가 이미 실행 중인지 확인
-            import asyncio
-            import aiohttp
-            
-            async def check_proxy_running():
-                try:
-                    async with aiohttp.ClientSession() as session:
-                        # /health 체크
-                        try:
-                            async with session.get(f"http://localhost:{proxy_port}/health", timeout=3) as resp:
-                                if resp.status == 200:
-                                    return True
-                        except:
-                            pass
-                        
-                        # /v1/models 체크 (fallback)
-                        try:
-                            async with session.get(f"http://localhost:{proxy_port}/v1/models", timeout=3) as resp:
-                                return resp.status == 200
-                        except:
-                            return False
-                except:
-                    return False
-            
-            # 3. 프록시 실행 상태 확인
-            proxy_running = await check_proxy_running()
-            
-            if not proxy_running:
-                print(f"🚀 {proxy_name} 프록시 서버 시작 중...")
-                proxy_started = await start_proxy()
-                if proxy_started:
-                    print(f"✅ {proxy_name} 프록시 서버 시작 성공")
-                    
-                    # 서버 초기화 대기
-                    await asyncio.sleep(2)
-                    
-                    # 다시 확인
-                    proxy_running = await check_proxy_running()
-                    if not proxy_running:
-                        print(f"⚠️  {proxy_name} 프록시 서버 시작됐지만 응답하지 않음, 표준 API로 폴백")
-                        clear_env()
-                else:
-                    print(f"❌ {proxy_name} 프록시 서버 시작 실패, 표준 API로 폴백")
-                    clear_env()
-            else:
-                print(f"✅ {proxy_name} 프록시 서버 이미 실행 중")
-                
-        except Exception as e:
-            print(f"⚠️  {proxy_name} 프록시 설정 오류: {e}, 표준 API로 폴백")
-            import traceback
-            traceback.print_exc()
-            try:
-                if proxy_mode == "chatgpt_oauth":
-                    from cores.chatgpt_proxy import clear_env
-                else:
-                    from cores.claude_proxy import clear_env
-                clear_env()
-            except:
-                pass
     # Check if Perplexity is configured for news analysis
     include_news = check_perplexity_configured()
 
@@ -236,10 +99,6 @@ async def generate_report(ticker: str, company_name: str, language: str = "ko") 
 
     start_time = time.time()
 
-    # Debug environment variables
-    print(f"DEBUG: OPENAI_BASE_URL = {os.environ.get('OPENAI_BASE_URL')}")
-    print(f"DEBUG: OPENAI_API_KEY = {'***' if os.environ.get('OPENAI_API_KEY') else '(empty)'}")
-    
     # Generate the report
     reference_date = datetime.now().strftime("%Y%m%d")
     report_content = await analyze_us_stock(
