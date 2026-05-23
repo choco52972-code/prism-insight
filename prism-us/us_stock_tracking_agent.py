@@ -154,9 +154,9 @@ except ImportError as e:
     )
     from tracking.journal import USJournalManager
     from tracking.compression import USCompressionManager
-# Load kis_auth from main project trading/ (prism-us/trading/ has no kis_auth)
+# Load kis_auth from main project trading/brokers/kis/ (moved from trading/ in KIS broker porting)
 import importlib.util as _importlib_util
-_kis_auth_spec = _importlib_util.spec_from_file_location("kis_auth", PROJECT_ROOT / "trading/kis_auth.py")
+_kis_auth_spec = _importlib_util.spec_from_file_location("kis_auth", PROJECT_ROOT / "trading/brokers/kis/kis_auth.py")
 ka = _importlib_util.module_from_spec(_kis_auth_spec)
 _kis_auth_spec.loader.exec_module(ka)
 

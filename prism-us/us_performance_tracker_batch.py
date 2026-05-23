@@ -58,6 +58,14 @@ except ImportError:
     MARKET_CALENDAR_AVAILABLE = False
     logger.warning("US market calendar not available.")
 
+# Import DB schema for table creation
+try:
+    from tracking.db_schema import create_us_tables, create_us_indexes
+    DB_SCHEMA_AVAILABLE = True
+except ImportError:
+    DB_SCHEMA_AVAILABLE = False
+    logger.warning("tracking.db_schema not available. Tables must be pre-created.")
+
 
 class USPerformanceTrackerBatch:
     """US Stock Performance Tracker Batch Processor"""
@@ -87,6 +95,12 @@ class USPerformanceTrackerBatch:
         conn = self.connect_db()
         try:
             cursor = conn.cursor()
+
+            # Create US tables if they don't exist (e.g., first run or tracking agent never ran)
+            if DB_SCHEMA_AVAILABLE:
+                create_us_tables(cursor, conn)
+                create_us_indexes(cursor, conn)
+
 
             # Check and add missing columns
             migrations = [
