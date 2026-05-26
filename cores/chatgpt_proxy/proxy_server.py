@@ -4,6 +4,7 @@ Lightweight aiohttp web server that translates Chat Completions API
 requests to ChatGPT Responses API format and back.
 """
 
+import asyncio
 import json
 import logging
 
@@ -17,6 +18,13 @@ from .token_manager import TokenManager
 logger = logging.getLogger(__name__)
 
 _token_manager: TokenManager | None = None
+
+# ChatGPT upstream timeout per attempt (seconds).
+# Logs show successful responses complete within ~130s at most.
+# 120s catches dropped requests early; up to PROXY_MAX_RETRIES retries follow.
+_UPSTREAM_TIMEOUT = 120
+_PROXY_MAX_RETRIES = 2
+_RETRY_DELAY = 1.0  # seconds between retries
 
 
 def create_app(token_manager: TokenManager) -> web.Application:
@@ -97,57 +105,70 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
                  original_model, translated_request.get("model"),
                  len(body.get("tools") or []), len(body.get("messages") or []))
 
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                CHATGPT_RESPONSES_URL,
-                json=translated_request,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=300),
-            ) as resp:
-                raw_body = await resp.text()
+    api_response = None
+    last_error: Exception | None = None
 
-                if resp.status != 200:
-                    # Try to parse error
-                    try:
-                        error_body = json.loads(raw_body)
-                    except json.JSONDecodeError:
-                        error_body = {"error": {"message": raw_body}}
+    for attempt in range(1, _PROXY_MAX_RETRIES + 1):
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    CHATGPT_RESPONSES_URL,
+                    json=translated_request,
+                    headers=headers,
+                    timeout=aiohttp.ClientTimeout(total=_UPSTREAM_TIMEOUT),
+                ) as resp:
+                    raw_body = await resp.text()
 
-                    translated_error, status = api_translator.translate_error(error_body, resp.status)
-                    logger.warning("ChatGPT API error (%d): %s", resp.status, raw_body[:200])
-                    return web.json_response(translated_error, status=status)
+                    if resp.status != 200:
+                        try:
+                            error_body = json.loads(raw_body)
+                        except json.JSONDecodeError:
+                            error_body = {"error": {"message": raw_body}}
 
-                # Parse response (may be SSE or JSON)
-                # Always request stream=true, so check both Content-Type and body format
-                content_type = resp.headers.get("Content-Type", "")
-                is_sse = "text/event-stream" in content_type or raw_body.lstrip().startswith("event:")
-                if is_sse:
-                    try:
-                        api_response = api_translator.collect_sse_to_response(raw_body)
-                        logger.debug("SSE parsed: output_items=%s status=%s",
-                                     [i.get("type") for i in api_response.get("output", [])],
-                                     api_response.get("status"))
-                    except ValueError as e:
-                        logger.error("SSE parsing failed: %s (Content-Type: %s, body[:200]: %s)", e, content_type, raw_body[:200])
-                        return web.json_response(
-                            {"error": {"message": f"SSE parsing error: {e}", "type": "server_error"}},
-                            status=502,
-                        )
-                else:
-                    try:
-                        api_response = json.loads(raw_body)
-                    except json.JSONDecodeError:
-                        logger.error("Invalid JSON response from ChatGPT (Content-Type: %s, body[:200]: %s)", content_type, raw_body[:200])
-                        return web.json_response(
-                            {"error": {"message": "Invalid response from upstream", "type": "server_error"}},
-                            status=502,
-                        )
+                        translated_error, status = api_translator.translate_error(error_body, resp.status)
+                        logger.warning("ChatGPT API error (%d): %s", resp.status, raw_body[:200])
+                        return web.json_response(translated_error, status=status)
 
-    except aiohttp.ClientError as e:
-        logger.error("Connection to ChatGPT failed: %s", e)
+                    # Parse response (may be SSE or JSON)
+                    content_type = resp.headers.get("Content-Type", "")
+                    is_sse = "text/event-stream" in content_type or raw_body.lstrip().startswith("event:")
+                    if is_sse:
+                        try:
+                            api_response = api_translator.collect_sse_to_response(raw_body)
+                            logger.debug("SSE parsed: output_items=%s status=%s",
+                                         [i.get("type") for i in api_response.get("output", [])],
+                                         api_response.get("status"))
+                        except ValueError as e:
+                            logger.error("SSE parsing failed: %s (Content-Type: %s, body[:200]: %s)", e, content_type, raw_body[:200])
+                            return web.json_response(
+                                {"error": {"message": f"SSE parsing error: {e}", "type": "server_error"}},
+                                status=502,
+                            )
+                    else:
+                        try:
+                            api_response = json.loads(raw_body)
+                        except json.JSONDecodeError:
+                            logger.error("Invalid JSON response from ChatGPT (Content-Type: %s, body[:200]: %s)", content_type, raw_body[:200])
+                            return web.json_response(
+                                {"error": {"message": "Invalid response from upstream", "type": "server_error"}},
+                                status=502,
+                            )
+            break  # success — exit retry loop
+
+        except (aiohttp.ClientError, TimeoutError) as e:
+            last_error = e
+            if attempt < _PROXY_MAX_RETRIES:
+                logger.warning(
+                    "ChatGPT upstream timeout/error on attempt %d/%d (%s). Retrying in %.1fs...",
+                    attempt, _PROXY_MAX_RETRIES, e, _RETRY_DELAY,
+                )
+                await asyncio.sleep(_RETRY_DELAY)
+            else:
+                logger.error("ChatGPT upstream failed after %d attempts: %s", _PROXY_MAX_RETRIES, e)
+
+    if api_response is None:
         return web.json_response(
-            {"error": {"message": f"Upstream connection error: {e}", "type": "server_error"}},
+            {"error": {"message": f"Upstream connection error: {last_error}", "type": "server_error"}},
             status=502,
         )
 
