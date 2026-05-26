@@ -167,7 +167,7 @@ class TelegramSummaryGenerator:
         # Check all possible modes (morning, afternoon)
         for mode in ["morning", "afternoon"]:
             # Trigger result file path
-            results_file = f"trigger_results_{mode}_{report_date}.json"
+            results_file = f"logs/trigger_results_{mode}_{report_date}.json"
 
             logger.info(f"Checking trigger result file: {results_file}")
 

@@ -163,15 +163,18 @@ def prefetch_macro_intelligence_data(reference_date: str) -> dict:
     ref_dt = datetime.strptime(reference_date, "%Y%m%d")
     start_date = (ref_dt - timedelta(days=45)).strftime("%Y%m%d")
 
-    # 1. KOSPI index OHLCV
-    kospi_md = prefetch_index_ohlcv("1001", start_date, reference_date)
-    if kospi_md:
-        result["kospi_ohlcv_md"] = kospi_md
+    # 1+2. KOSPI/KOSDAQ index OHLCV — raw dict 한 번만 조회 후 markdown 변환 & regime 계산에 재사용
+    kospi_raw, kosdaq_raw = {}, {}
+    try:
+        kospi_raw = server.get_index_ohlcv(start_date, reference_date, "1001")
+        kosdaq_raw = server.get_index_ohlcv(start_date, reference_date, "2001")
+    except Exception as e:
+        logger.error(f"Error fetching index OHLCV: {e}")
 
-    # 2. KOSDAQ index OHLCV
-    kosdaq_md = prefetch_index_ohlcv("2001", start_date, reference_date)
-    if kosdaq_md:
-        result["kosdaq_ohlcv_md"] = kosdaq_md
+    if kospi_raw:
+        result["kospi_ohlcv_md"] = _dict_to_markdown(kospi_raw, f"KOSPI Index ({start_date}~{reference_date})")
+    if kosdaq_raw:
+        result["kosdaq_ohlcv_md"] = _dict_to_markdown(kosdaq_raw, f"KOSDAQ Index ({start_date}~{reference_date})")
 
     # 3. Sector map (ticker → sector name) via get_sector_info
     try:
@@ -192,10 +195,8 @@ def prefetch_macro_intelligence_data(reference_date: str) -> dict:
     except Exception as e:
         logger.error(f"Error fetching sector map: {e}")
 
-    # 4. Compute regime from raw KOSPI data
+    # 4. Compute regime — 위에서 받은 raw dict 재사용 (추가 API 호출 없음)
     try:
-        kospi_raw = server.get_index_ohlcv(start_date, reference_date, "1001")
-        kosdaq_raw = server.get_index_ohlcv(start_date, reference_date, "2001")
         if kospi_raw:
             result["computed_regime"] = _compute_kr_regime(kospi_raw, kosdaq_raw)
     except Exception as e:

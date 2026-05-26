@@ -231,10 +231,10 @@ def calculate_agent_fit_metrics(ticker: str, current_price: float, trade_date: s
         dict with keys: stop_loss_price, target_price, stop_loss_pct, risk_reward_ratio, agent_fit_score
     """
     result = {
-        "stop_loss_price": 0,
-        "target_price": 0,
+        "stop_loss_price": 0,  # 손절가
+        "target_price": 0,     # 목표가
         "stop_loss_pct": 1.0,  # Default: unfavorable value
-        "risk_reward_ratio": 0,
+        "risk_reward_ratio": 0,  # 위험보상비율
         "agent_fit_score": 0,
     }
 
@@ -347,10 +347,10 @@ def score_candidates_by_agent_criteria(candidates_df: pd.DataFrame, trade_date: 
         current_price = result_df.loc[ticker, "Close"]
         metrics = calculate_agent_fit_metrics(ticker, current_price, trade_date, lookback_days, trigger_type)
 
-        result_df.loc[ticker, "stop_loss_price"] = metrics["stop_loss_price"]
-        result_df.loc[ticker, "target_price"] = metrics["target_price"]
-        result_df.loc[ticker, "stop_loss_pct"] = metrics["stop_loss_pct"]
-        result_df.loc[ticker, "risk_reward_ratio"] = metrics["risk_reward_ratio"]
+        result_df.loc[ticker, "stop_loss_price"] = metrics["stop_loss_price"]  # 손절가
+        result_df.loc[ticker, "target_price"] = metrics["target_price"]   # 목표가
+        result_df.loc[ticker, "stop_loss_pct"] = metrics["stop_loss_pct"]  # 손절율
+        result_df.loc[ticker, "risk_reward_ratio"] = metrics["risk_reward_ratio"]  # 위험보상비율
         result_df.loc[ticker, "agent_fit_score"] = metrics["agent_fit_score"]
 
     return result_df
@@ -359,12 +359,17 @@ def score_candidates_by_agent_criteria(candidates_df: pd.DataFrame, trade_date: 
 # --- Morning trigger functions (based on market open snapshot) ---
 def trigger_morning_volume_surge(trade_date: str, snapshot: pd.DataFrame, prev_snapshot: pd.DataFrame, cap_df: pd.DataFrame = None, top_n: int = 10) -> pd.DataFrame:
     """
-    [Morning Trigger 1] Top stocks with intraday volume surge
-    - Absolute criteria: Minimum trade value 500M KRW + at least 20% of market average volume
-    - Additional filter: Volume increase of 30% or more
-    - Composite score: Volume increase rate (60%) + Absolute volume (40%)
-    - Secondary filtering: Select only rising stocks (current price > opening price)
-    - Penny stock filter: Market cap 50B KRW or more
+    [Morning Trigger 1] Top stocks with intraday volume surge(전일대비 거래량 급증 상위주)
+    - Penny stock filter:
+        시가총액 5,000억 이상
+    - Absolute criteria:
+        거래대금 100억 이상, 거래량 시장평균 20% 이상
+    - Additional filter:
+        전일대비등락률 ≤ 20%
+    - Secondary filtering:
+        Select only rising stocks (current price > opening price)
+    - Composite score:
+        Volume increase rate (60%) + Absolute volume (40%)
     """
     logger.debug("trigger_morning_volume_surge started")
     common = snapshot.index.intersection(prev_snapshot.index)
@@ -375,7 +380,7 @@ def trigger_morning_volume_surge(trade_date: str, snapshot: pd.DataFrame, prev_s
     if cap_df is not None and not cap_df.empty:
         snap = snap.merge(cap_df[["시가총액"]], left_index=True, right_index=True, how="inner")
         # Select stocks with market cap 500B KRW or more (v1.16.6: expanded opportunity pool, 518 stocks)
-        snap = snap[snap["시가총액"] >= 500000000000]
+        snap = snap[snap["시가총액"] >= 500000000000]  # 시가총액 5천억 이상
         logger.debug(f"Stock count after market cap filtering: {len(snap)}")
         if snap.empty:
             logger.warning("No stocks after market cap filtering")
@@ -386,6 +391,7 @@ def trigger_morning_volume_surge(trade_date: str, snapshot: pd.DataFrame, prev_s
     logger.debug(f"Current day close data sample: {snap['Close'].head()}")
 
     # Apply absolute criteria (raised to 10B KRW trade value)
+    #  거래대금 100억원 이상, 거래량 시장평균 20% 이상
     snap = apply_absolute_filters(snap, min_value=10000000000)
 
     # Calculate volume ratio
@@ -400,7 +406,7 @@ def trigger_morning_volume_surge(trade_date: str, snapshot: pd.DataFrame, prev_s
     snap["prev_day_change_rate"] = ((snap["Close"] - prev["Close"]) / prev["Close"]) * 100
 
     # v1.16.6: Change rate upper limit (20% or less, surge stocks can enter with fixed stop-loss)
-    snap = snap[snap["prev_day_change_rate"] <= 20.0]
+    snap = snap[snap["prev_day_change_rate"] <= 20.0]  # 전일대비등락률 20% 이하
 
     # Debug calculation process for first 5 stocks' change rate vs previous day
     for ticker in snap.index[:5]:
@@ -412,10 +418,10 @@ def trigger_morning_volume_surge(trade_date: str, snapshot: pd.DataFrame, prev_s
         except Exception as e:
             logger.debug(f"Error during debugging: {e}")
 
-    snap["is_rising"] = snap["Close"] > snap["Open"]
+    snap["is_rising"] = snap["Close"] > snap["Open"]  # 상승중인가
 
     # Filter for volume increase rate 30% or more
-    snap = snap[snap["volume_increase_rate"] >= 30.0]
+    snap = snap[snap["volume_increase_rate"] >= 30.0]  # 거래량 증가율 30% 이상
 
     if snap.empty:
         logger.debug("trigger_morning_volume_surge: No stocks with volume increase")
@@ -438,10 +444,12 @@ def trigger_morning_volume_surge(trade_date: str, snapshot: pd.DataFrame, prev_s
 def trigger_morning_gap_up_momentum(trade_date: str, snapshot: pd.DataFrame, prev_snapshot: pd.DataFrame, cap_df: pd.DataFrame = None, top_n: int = 15) -> pd.DataFrame:
     """
     [Morning Trigger 2] Top gap-up momentum stocks
-    - Absolute criteria: Minimum trade value 500M KRW or more
+    - Penny stock filter:
+        시가총액 5,000억 이상
+    - Absolute criteria:
+        거래대금 100억 이상, 거래량 시장평균 20% 이상
     - Composite score: Gap rate (50%) + Intraday rise (30%) + Trade value (20%)
     - Secondary filtering: Select only stocks with current price > opening price (sustained rise)
-    - Penny stock filter: Market cap 50B KRW or more
     """
     logger.debug("trigger_morning_gap_up_momentum started")
     common = snapshot.index.intersection(prev_snapshot.index)
@@ -452,7 +460,7 @@ def trigger_morning_gap_up_momentum(trade_date: str, snapshot: pd.DataFrame, pre
     if cap_df is not None and not cap_df.empty:
         snap = snap.merge(cap_df[["시가총액"]], left_index=True, right_index=True, how="inner")
         # Select stocks with market cap 500B KRW or more (v1.16.6: expanded opportunity pool, 518 stocks)
-        snap = snap[snap["시가총액"] >= 500000000000]
+        snap = snap[snap["시가총액"] >= 500000000000]  # 시총 5천억 이상
         logger.debug(f"Stock count after market cap filtering: {len(snap)}")
         if snap.empty:
             logger.warning("No stocks after market cap filtering")
@@ -1324,35 +1332,36 @@ def run_batch(trigger_time: str, log_level: str = "INFO", output_file: str = Non
     cap_df = get_market_cap_df(trade_date, market="ALL")
     logger.debug(f"Market cap data stock count: {len(cap_df)}")
 
-    if trigger_time == "morning":
+    if trigger_time == "morning":  # 오전
         logger.info("=== Morning batch execution ===")
         # Execute morning triggers - pass cap_df
-        res1 = trigger_morning_volume_surge(trade_date, snapshot, prev_snapshot, cap_df)
-        res2 = trigger_morning_gap_up_momentum(trade_date, snapshot, prev_snapshot, cap_df)
-        res3 = trigger_morning_value_to_cap_ratio(trade_date, snapshot, prev_snapshot, cap_df)
+        res1 = trigger_morning_volume_surge(trade_date, snapshot, prev_snapshot, cap_df)  # 전일대비 거래량급증(≥20%) 상위주
+        res2 = trigger_morning_gap_up_momentum(trade_date, snapshot, prev_snapshot, cap_df)  # 갭 상승 모멘텀 상위주
+        res3 = trigger_morning_value_to_cap_ratio(trade_date, snapshot, prev_snapshot, cap_df)  # 시총 대비 집중 자금 유입주
         triggers = {"거래량 급증 상위주": res1, "갭 상승 모멘텀 상위주": res2, "시총 대비 집중 자금 유입 상위주": res3}
-    elif trigger_time == "afternoon":
+    elif trigger_time == "afternoon":  # 오후
         logger.info("=== Afternoon batch execution ===")
         # Execute afternoon triggers - pass cap_df
-        res1 = trigger_afternoon_daily_rise_top(trade_date, snapshot, prev_snapshot, cap_df)
-        res2 = trigger_afternoon_closing_strength(trade_date, snapshot, prev_snapshot, cap_df)
-        res3 = trigger_afternoon_volume_surge_flat(trade_date, snapshot, prev_snapshot, cap_df)
+        res1 = trigger_afternoon_daily_rise_top(trade_date, snapshot, prev_snapshot, cap_df)  # 일중 상승률 상위주
+        res2 = trigger_afternoon_closing_strength(trade_date, snapshot, prev_snapshot, cap_df)  # 마감강도 상위주
+        res3 = trigger_afternoon_volume_surge_flat(trade_date, snapshot, prev_snapshot, cap_df)  # 거래량 증가 상위 횡보주
         triggers = {"일중 상승률 상위주": res1, "마감 강도 상위주": res2, "거래량 증가 상위 횡보주": res3}
     else:
         logger.error("Invalid trigger_time value. Please enter 'morning' or 'afternoon'.")
         return
 
     # === New triggers: active based on market regime ===
-    if macro_context:
-        market_regime = macro_context.get("market_regime", "sideways")
+    if macro_context:  # macro 정보(inteligence)가 있다면
+        market_regime = macro_context.get("market_regime", "sideways")  # 시장환경
         # Macro sector trigger: active in all regimes except strong_bull
-        if market_regime not in ("strong_bull",):
+        if market_regime not in ("strong_bull",):  # 시장환경이 강세장이 아니라면
+            # 주도 섹터를 찾는다
             res_macro = trigger_macro_sector_leader(trade_date, snapshot, prev_snapshot, cap_df, macro_context)
             if not res_macro.empty:
                 triggers["매크로 섹터 리더"] = res_macro
                 logger.info(f"매크로 섹터 리더: {len(res_macro)} candidates")
 
-        # Contrarian value: active in sideways, moderate_bear, strong_bear
+        # Contrarian value: active in sideways(횡보), moderate_bear(온건약세), strong_bear(강약세장)
         if market_regime in ("sideways", "moderate_bear", "strong_bear"):
             res_value = trigger_contrarian_value(trade_date, snapshot, prev_snapshot, cap_df)
             if not res_value.empty:
