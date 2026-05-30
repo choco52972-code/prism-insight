@@ -157,11 +157,19 @@ Return the translations in the same numbered format.""",
 
             # Validate and construct result
             result = list(texts)  # Copy original
+            missing = []  # (batch_index, original_index, text)
             for i, valid_idx in enumerate(valid_indices):
                 if (i + 1) in translated_dict:
                     result[valid_idx] = translated_dict[i + 1]
                 else:
-                    logger.warning(f"Translation result missing: index {i+1}")
+                    logger.warning(f"Translation result missing: index {i+1}, retrying individually")
+                    missing.append((i, valid_idx, valid_texts[i]))
+
+            # Retry missing items individually
+            if missing:
+                logger.info(f"Retrying {len(missing)} missing translation(s) individually")
+                for _, valid_idx, text in missing:
+                    result[valid_idx] = await self.translate_text(text, from_lang, to_lang)
 
             return result
 

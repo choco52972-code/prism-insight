@@ -47,10 +47,10 @@ cat >> "$TEMP_CRON" << EOF
 
 # === PRISM-INSIGHT 자동 실행 스케줄 ===
 # 오전 9시 30분 - 오전 분석 (월-금)
-30 9 * * 1-5 cd $PROJECT_DIR && $PYTHON_CMD stock_analysis_orchestrator.py --mode morning >> $PROJECT_DIR/logs/morning.log 2>&1
+30 9 * * 1-5 cd $PROJECT_DIR && $PYTHON_CMD stock_analysis_orchestrator.py --mode morning >> $PROJECT_DIR/logs/morning_$(date +\%Y\%m\%d).log 2>&1
 
 # 오후 3시 40분 - 오후 분석 (월-금)
-40 15 * * 1-5 cd $PROJECT_DIR && $PYTHON_CMD stock_analysis_orchestrator.py --mode afternoon >> $PROJECT_DIR/logs/afternoon.log 2>&1
+40 15 * * 1-5 cd $PROJECT_DIR && $PYTHON_CMD stock_analysis_orchestrator.py --mode afternoon >> $PROJECT_DIR/logs/afternoon_$(date +\%Y\%m\%d).log 2>&1
 
 # 오전 7시 - 데이터 업데이트 (월-금)
 0 7 * * 1-5 cd $PROJECT_DIR && $PYTHON_CMD update_stock_data.py >> $PROJECT_DIR/logs/update.log 2>&1

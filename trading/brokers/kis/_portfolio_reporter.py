@@ -31,8 +31,12 @@ sys.path.insert(0, str(PARENT_DIR))               # project root - MUST be first
 
 # Load configuration file
 CONFIG_FILE = TRADING_DIR / "config" / "kis_devlp.yaml"
-with open(CONFIG_FILE, encoding="UTF-8") as f:
-    _cfg = yaml.safe_load(f)
+try:
+    with open(CONFIG_FILE, encoding="UTF-8") as f:
+        _cfg = yaml.safe_load(f) or {}
+except FileNotFoundError:
+    _cfg = {}
+    logger.warning(f"Could not register real kis_auth: {CONFIG_FILE} not found")
 
 # Import local modules
 from trading.domestic_stock_trading import DomesticStockTrading
@@ -99,11 +103,11 @@ class PortfolioTelegramReporter:
         self._load_broadcast_channels()
 
         # Trading configuration - use yaml default_mode as default value
-        self.trading_mode = trading_mode if trading_mode is not None else _cfg["default_mode"]
+        self.trading_mode = trading_mode if trading_mode is not None else _cfg.get("default_mode", "demo")
         self.telegram_bot = TelegramBotAgent(token=self.telegram_token)
 
         logger.info(f"PortfolioTelegramReporter initialized")
-        logger.info(f"Trading mode: {self.trading_mode} (yaml config: {_cfg['default_mode']})")
+        logger.info(f"Trading mode: {self.trading_mode} (yaml config: {_cfg.get('default_mode', 'demo')})")
 
     def _load_broadcast_channels(self):
         """
@@ -541,7 +545,7 @@ async def main():
 
     parser = argparse.ArgumentParser(description="Portfolio Telegram Reporter")
     parser.add_argument("--mode", choices=["demo", "real"],
-                       help=f"Trading mode (demo: paper trading, real: live trading, default: {_cfg['default_mode']})")
+                       help=f"Trading mode (demo: paper trading, real: live trading, default: {_cfg.get('default_mode', 'demo')})")
     parser.add_argument("--type", choices=["full", "simple", "morning", "evening", "market_close", "weekend"],
                        default="full", help="Report type")
     parser.add_argument("--token", help="Telegram bot token")
