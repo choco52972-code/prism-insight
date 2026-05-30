@@ -224,6 +224,24 @@ def translate_response(response_body: dict, model: str) -> dict:
     }
 
 
+def normalize_responses_request(body: dict) -> dict:
+    """Prepare a Responses API request for the ChatGPT upstream.
+
+    The request is already in Responses API format (input/model/reasoning/...),
+    so only model mapping and mandatory ChatGPT backend fields are applied.
+    """
+    normalized = dict(body)
+    normalized["model"] = _map_model(body.get("model", "gpt-4o"))
+    normalized["store"] = False   # MANDATORY: store:true returns 400
+    normalized["stream"] = True   # MANDATORY: always stream upstream
+    # ChatGPT backend requires instructions field even when not set by caller
+    if "instructions" not in normalized:
+        normalized["instructions"] = "You are a helpful assistant."
+    # ChatGPT backend does not support max_output_tokens (returns 400)
+    normalized.pop("max_output_tokens", None)
+    return normalized
+
+
 def translate_error(error_body: dict, status_code: int) -> tuple[dict, int]:
     """Translate Responses API error to Chat Completions error format."""
     error = error_body.get("error", {})

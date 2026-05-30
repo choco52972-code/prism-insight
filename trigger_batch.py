@@ -242,17 +242,17 @@ def calculate_agent_fit_metrics(ticker: str, current_price: float, trade_date: s
         return result
 
     # v1.16.6: Query criteria by trigger type (query first)
-    criteria = TRIGGER_CRITERIA.get(trigger_type, TRIGGER_CRITERIA["default"])
-    sl_max = criteria["sl_max"]
-    rr_target = criteria["rr_target"]
+    criteria = TRIGGER_CRITERIA.get(trigger_type, TRIGGER_CRITERIA["default"])  # 기준
+    sl_max = criteria["sl_max"]        # Stop-Loss Max
+    rr_target = criteria["rr_target"]  # Risk-to-Reward Ratio
 
     # v1.16.6 Core change: Apply fixed stop-loss method
     # Before: 10-day low based → 48%+ stop-loss on surge stocks → agent rejection
     # After: Current price based fixed ratio → always meets agent criteria
-    stop_loss_price = current_price * (1 - sl_max)
-    stop_loss_pct = sl_max  # Fixed value (5% or 7%)
+    stop_loss_price = current_price * (1 - sl_max)   # 손절가
+    stop_loss_pct = sl_max  # Fixed value (5% or 7%) # 손실률
 
-    # Target price calculation: Maintain existing resistance level method
+    # Target price calculation: Maintain existing resistance level method - 10일 최고가를 저항선으로 봄
     multi_day_df = get_multi_day_ohlcv(ticker, trade_date, lookback_days)
     if multi_day_df.empty or len(multi_day_df) < 3:
         # Default to current price + 15% when data is insufficient
@@ -263,7 +263,7 @@ def calculate_agent_fit_metrics(ticker: str, current_price: float, trade_date: s
         high_col = "High" if "High" in multi_day_df.columns else "고가"
 
         if high_col not in multi_day_df.columns:
-            target_price = current_price * 1.15
+            target_price = current_price * 1.15  # 고가 col이 없을경우 현재가의 15%
             logger.debug(f"{ticker}: No high column, applying default target price")
         else:
             # Filter out 0 values (market holidays or data errors)
@@ -272,10 +272,10 @@ def calculate_agent_fit_metrics(ticker: str, current_price: float, trade_date: s
                 target_price = current_price * 1.15
             else:
                 # Resistance level (highest among recent N-day highs)
-                target_price = valid_highs.max()
+                target_price = valid_highs.max()  # lookback(10일) 최고가
 
     # v1.16.6 Residual risk mitigation: Guarantee minimum +15% target
-    min_target = current_price * 1.15
+    min_target = current_price * 1.15  # 최소 목표가는 현재가의 +15%
     if target_price <= current_price:
         target_price = min_target
         logger.debug(f"{ticker}: Target price below current price, applying minimum ({target_price:.0f})")
@@ -285,8 +285,8 @@ def calculate_agent_fit_metrics(ticker: str, current_price: float, trade_date: s
         target_price = min_target
 
     # Calculate risk-reward ratio
-    potential_gain = target_price - current_price
-    potential_loss = current_price - stop_loss_price
+    potential_gain = target_price - current_price    # 예상수익
+    potential_loss = current_price - stop_loss_price # 예상손실
 
     if potential_loss > 0 and potential_gain > 0:
         risk_reward_ratio = potential_gain / potential_loss
@@ -860,7 +860,7 @@ def trigger_macro_sector_leader(trade_date: str, snapshot: pd.DataFrame,
         logger.debug("trigger_macro_sector_leader: No macro_context provided")
         return pd.DataFrame()
 
-    leading_sectors = macro_context.get("leading_sectors", [])
+    leading_sectors = macro_context.get("leading_sectors", [])  # 주도섹터
     if not leading_sectors:
         logger.debug("trigger_macro_sector_leader: No leading sectors in macro_context")
         return pd.DataFrame()
@@ -872,14 +872,14 @@ def trigger_macro_sector_leader(trade_date: str, snapshot: pd.DataFrame,
     snap = snapshot.loc[common].copy()
     prev = prev_snapshot.loc[common].copy()
 
-    # Absolute filters (100억원)
+    # Absolute filters (100억원 and 시장거래대금의 20%이상)
     snap = apply_absolute_filters(snap, min_value=10000000000)
 
     if snap.empty:
         logger.debug("trigger_macro_sector_leader: No stocks pass absolute filters")
         return pd.DataFrame()
 
-    # Limit to top 100 by Amount
+    # Limit to top 100 by Amount - 거래대금 상위 100종목 추출
     top100 = snap.nlargest(100, "Amount")
 
     # Build sector confidence lookup and leading sector names
@@ -894,19 +894,19 @@ def trigger_macro_sector_leader(trade_date: str, snapshot: pd.DataFrame,
     # Filter stocks whose sector matches any leading sector (fuzzy substring match)
     matched_rows = []
     matched_confs = []
-    for ticker in top100.index:
+    for ticker in top100.index:  # 거래대금 상위 100종목중에서
         stock_sector = sector_map.get(ticker, "")
         if not stock_sector:
             continue
         matched_sector = None
-        if stock_sector in leading_names:
+        if stock_sector in leading_names:  # 주도섹터에 속하는지
             matched_sector = stock_sector
         else:
-            for l in leading_names:
+            for l in leading_names:  # 주도섹터중에서
                 if stock_sector in l or l in stock_sector:
                     matched_sector = l
                     break
-        if matched_sector:
+        if matched_sector:  # 주도섹터에 속한다면
             matched_rows.append(ticker)
             matched_confs.append(sector_confidence.get(matched_sector, 0.5))
 
@@ -914,29 +914,29 @@ def trigger_macro_sector_leader(trade_date: str, snapshot: pd.DataFrame,
         logger.debug("trigger_macro_sector_leader: No stocks matched leading sectors")
         return pd.DataFrame()
 
-    snap_filtered = top100.loc[matched_rows].copy()
+    snap_filtered = top100.loc[matched_rows].copy()  # 주도섹터에 속하는 종목만 필터링
     snap_filtered["SectorConfidence"] = matched_confs
 
-    # Calculate daily change for relative strength
+    # Calculate daily change for relative strength - 전일대비 등락률 계산
     snap_filtered["DailyChange"] = ((snap_filtered["Close"] - prev.loc[matched_rows, "Close"]) /
                                      prev.loc[matched_rows, "Close"]) * 100
 
-    # Market average change for relative strength calculation
+    # Market average change for relative strength calculation -  시장등락률 계산
     market_avg_change = (
         ((snap["Close"] - prev["Close"]) / prev["Close"]) * 100
     ).mean()
-    snap_filtered["RelativeStrength"] = snap_filtered["DailyChange"] - market_avg_change
+    snap_filtered["RelativeStrength"] = snap_filtered["DailyChange"] - market_avg_change  # 시장대비 상대강도
 
-    # Normalize each component
+    # Normalize each component - 정규화 함수
     def _norm_col(series: pd.Series) -> pd.Series:
         col_min = series.min()
         col_max = series.max()
         col_range = col_max - col_min if col_max > col_min else 1
         return (series - col_min) / col_range
 
-    snap_filtered["RelativeStrength_norm"] = _norm_col(snap_filtered["RelativeStrength"])
-    snap_filtered["Amount_norm"] = _norm_col(snap_filtered["Amount"])
-    snap_filtered["SectorConfidence_norm"] = _norm_col(snap_filtered["SectorConfidence"])
+    snap_filtered["RelativeStrength_norm"] = _norm_col(snap_filtered["RelativeStrength"])  # 상대강도 정규화
+    snap_filtered["Amount_norm"] = _norm_col(snap_filtered["Amount"])                      # 거래대금 정규화
+    snap_filtered["SectorConfidence_norm"] = _norm_col(snap_filtered["SectorConfidence"])  # 섹터컨피던스 정규화
 
     # Market cap proxy: use cap_df if available, otherwise Amount
     if cap_df is not None and not cap_df.empty and "시가총액" in cap_df.columns:
@@ -947,7 +947,7 @@ def trigger_macro_sector_leader(trade_date: str, snapshot: pd.DataFrame,
     else:
         snap_filtered["MarketCap_norm"] = snap_filtered["Amount_norm"]
 
-    snap_filtered["CompositeScore"] = (
+    snap_filtered["CompositeScore"] = (  # 종합점수 산정
         snap_filtered["RelativeStrength_norm"] * 0.3 +
         snap_filtered["Amount_norm"] * 0.2 +
         snap_filtered["SectorConfidence_norm"] * 0.3 +
@@ -978,10 +978,10 @@ def trigger_contrarian_value(trade_date: str, snapshot: pd.DataFrame,
     snap = snapshot.loc[common].copy()
     prev = prev_snapshot.loc[common].copy()
 
-    # Absolute filters (100억원)
+    # Absolute filters (100억원 and 시장거래대금의 20%이상)
     snap = apply_absolute_filters(snap, min_value=10000000000)
 
-    # Filter rising stocks today (Close > Open) — positive recovery signal
+    # Filter rising stocks today (Close > prev Close) — positive recovery signal
     snap["DailyChange"] = ((snap["Close"] - prev["Close"]) / prev["Close"]) * 100
     snap = snap[snap["Close"] > snap["Open"]]
 
@@ -989,30 +989,30 @@ def trigger_contrarian_value(trade_date: str, snapshot: pd.DataFrame,
         logger.debug("trigger_contrarian_value: No rising stocks after absolute filter")
         return pd.DataFrame()
 
-    # Limit to top 50 by Amount to reduce data fetch calls
+    # Limit to top 50 by Amount to reduce data fetch calls - 거래대금 상위 50개 종목
     candidates = snap.nlargest(50, "Amount").copy()
 
     # Calculate date range for 52-week high lookup
     trade_dt = datetime.datetime.strptime(trade_date, '%Y%m%d')
-    start_dt = trade_dt - datetime.timedelta(days=365)
+    start_dt = trade_dt - datetime.timedelta(days=365)  # 1년전
     start_date_str = start_dt.strftime('%Y%m%d')
 
     # Fetch 52-week high and fundamentals for each candidate
     rows = []
-    for i, ticker in enumerate(candidates.index):
+    for i, ticker in enumerate(candidates.index):  # 거래대금 상위 50개 종목중에서
         logger.debug(f"trigger_contrarian_value: fetching data for {ticker} ({i+1}/{len(candidates)})")
         try:
             hist = get_market_ohlcv_by_date(start_date_str, trade_date, ticker, adjusted=False)
             if hist.empty:
                 continue
-            high_52w = float(hist["High"].max())
+            high_52w = float(hist["High"].max())  # 52주(1년) 최고가
             current_price = float(candidates.loc[ticker, "Close"])
             if high_52w <= 0:
                 continue
             drawdown = (current_price - high_52w) / high_52w * 100
 
             # Filter: drawdown between -15% and -40%
-            if not (-40.0 <= drawdown <= -15.0):
+            if not (-40.0 <= drawdown <= -15.0):  # -40% 이상 빠지거나 -15%보다 덜 빠진 종목 필터링
                 continue
 
             fund_df = get_market_fundamental_by_date(start_date_str, trade_date, ticker)
@@ -1326,10 +1326,10 @@ def run_batch(trigger_time: str, log_level: str = "INFO", output_file: str = Non
         logger.info(f"Retry batch reference trading date: {trade_date}")
         snapshot = get_snapshot(trade_date)
 
-    prev_snapshot, prev_date = get_previous_snapshot(trade_date)
+    prev_snapshot, prev_date = get_previous_snapshot(trade_date)  # 전일 snapshot
     logger.debug(f"Previous trading date: {prev_date}")
 
-    cap_df = get_market_cap_df(trade_date, market="ALL")
+    cap_df = get_market_cap_df(trade_date, market="ALL")  # 시가총액
     logger.debug(f"Market cap data stock count: {len(cap_df)}")
 
     if trigger_time == "morning":  # 오전
@@ -1355,7 +1355,7 @@ def run_batch(trigger_time: str, log_level: str = "INFO", output_file: str = Non
         market_regime = macro_context.get("market_regime", "sideways")  # 시장환경
         # Macro sector trigger: active in all regimes except strong_bull
         if market_regime not in ("strong_bull",):  # 시장환경이 강세장이 아니라면
-            # 주도 섹터를 찾는다
+            # 주도 섹터를 찾는다.(시장대비 상대강도 30% + 거래대금 20% + 섹터컨피던스 30% + 시가총액 20%)
             res_macro = trigger_macro_sector_leader(trade_date, snapshot, prev_snapshot, cap_df, macro_context)
             if not res_macro.empty:
                 triggers["매크로 섹터 리더"] = res_macro
@@ -1363,6 +1363,7 @@ def run_batch(trigger_time: str, log_level: str = "INFO", output_file: str = Non
 
         # Contrarian value: active in sideways(횡보), moderate_bear(온건약세), strong_bear(강약세장)
         if market_regime in ("sideways", "moderate_bear", "strong_bear"):
+            # 가치주?; 하락(-40%~-15%)률 30% + 거래대금 20% + PBR 30% + 전일등락률 20%
             res_value = trigger_contrarian_value(trade_date, snapshot, prev_snapshot, cap_df)
             if not res_value.empty:
                 triggers["역발상 가치주"] = res_value
