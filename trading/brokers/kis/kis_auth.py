@@ -387,6 +387,18 @@ def resolve_account(
 _TRENV = None
 _TRENV_LOCK = threading.RLock()
 _last_auth_time = datetime.now()
+
+# Per-account token request locks: prevents simultaneous KIS token requests hitting
+# the 1-per-minute rate limit (EGW00133) when multiple stocks initialize in parallel.
+_token_request_locks: dict = {}
+_token_request_locks_mutex = threading.Lock()
+
+
+def _get_token_lock(lock_key: str) -> threading.Lock:
+    with _token_request_locks_mutex:
+        if lock_key not in _token_request_locks:
+            _token_request_locks[lock_key] = threading.Lock()
+        return _token_request_locks[lock_key]
 _autoReAuth = False
 _DEBUG = False
 _isPaper = False
@@ -1082,46 +1094,52 @@ def auth(
     p["appkey"] = app_key
     p["appsecret"] = app_secret
 
-    # Check for existing valid token (per-account if account_key provided)
-    saved_token = read_token(account_key=account_key)
+    # Serialize token requests per account to avoid hitting KIS rate limit (EGW00133:
+    # 1 request/minute). Without this lock, parallel stock initialization calls all
+    # see no cached token and fire simultaneous requests.
+    token_lock = _get_token_lock(f"{svr}:{account_key or 'global'}")
+    with token_lock:
+        # Double-checked: another thread may have fetched and saved the token while
+        # we were waiting for the lock.
+        saved_token = read_token(account_key=account_key)
 
-    if saved_token is None:
-        # No valid token - request new one
-        token_url = f"{_cfg[svr]}/oauth2/tokenP"
-        logging.info(f"Requesting new token from KIS API ({svr} mode)...")
+        if saved_token is None:
+            # No valid token - request new one
+            token_url = f"{_cfg[svr]}/oauth2/tokenP"
+            logging.info(f"Requesting new token from KIS API ({svr} mode)...")
 
-        try:
-            # Use retry logic for transient failures
-            result = _request_token_with_retry(token_url, p, _getBaseHeader())
+            try:
+                # Use retry logic for transient failures
+                result = _request_token_with_retry(token_url, p, _getBaseHeader())
 
-            my_token = result.get("access_token")
-            my_expired = result.get("access_token_token_expired")
+                my_token = result.get("access_token")
+                my_expired = result.get("access_token_token_expired")
 
-            if not my_token or not my_expired:
-                raise TokenRequestError(
-                    "Invalid response from KIS API: missing token or expiry",
-                    status_code=200,
-                    response_text=str(result)
-                )
+                if not my_token or not my_expired:
+                    raise TokenRequestError(
+                        "Invalid response from KIS API: missing token or expiry",
+                        status_code=200,
+                        response_text=str(result)
+                    )
 
-            # Save the new token (per-account if account_key provided)
-            save_token(my_token, my_expired, account_key=account_key)
-            logging.info(f"✅ New token obtained and saved (expires: {my_expired})")
+                # Save the new token (per-account if account_key provided)
+                save_token(my_token, my_expired, account_key=account_key)
+                logging.info(f"✅ New token obtained and saved (expires: {my_expired})")
 
-        except TokenRequestError as e:
-            logging.error(f"❌ Token request failed: {e}")
-            logging.error(f"   Status Code: {e.status_code}")
-            logging.error(f"   Response: {e.response_text}")
-            # Re-raise with clear error message
-            raise
+            except TokenRequestError as e:
+                logging.error(f"❌ Token request failed: {e}")
+                logging.error(f"   Status Code: {e.status_code}")
+                logging.error(f"   Response: {e.response_text}")
+                # Re-raise with clear error message
+                raise
 
-        except Exception as e:
-            logging.error(f"❌ Unexpected error during token request: {e}")
-            raise TokenRequestError(f"Unexpected error: {e}")
+            except Exception as e:
+                logging.error(f"❌ Unexpected error during token request: {e}")
+                raise TokenRequestError(f"Unexpected error: {e}")
 
-    else:
-        my_token = saved_token
-        logging.info("✅ Using existing valid token")
+        else:
+            my_token = saved_token
+            logging.info("✅ Using existing valid token")
 
     # Set up environment with token
     changeTREnv(
