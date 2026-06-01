@@ -41,34 +41,28 @@ async def show_balance():
     print("=" * 50)
 
     async with AsyncTradingContext("demo", BUY_AMOUNT) as trader:
-        summary = await asyncio.to_thread(trader.get_account_summary)
-        portfolio = await asyncio.to_thread(trader.get_portfolio)
+        balance = await trader.get_balance()
+        positions = await trader.get_positions()
 
-    if summary is not None:
-        print(f"  예수금      : {summary.get('deposit', 0):>15,.0f} 원")
-        print(f"  총평가금액  : {summary.get('total_eval_amount', 0):>15,.0f} 원")
-        print(f"  총손익      : {summary.get('total_profit_amount', 0):>+15,.0f} 원")
-        print(f"  총수익률    : {summary.get('total_profit_rate', 0):>+14.2f} %")
-        print(f"  주문가능현금: {summary.get('available_amount', 0):>15,.0f} 원")
-        if summary.get('available_amount', 0) == 0 and summary.get('deposit', 0) > 0:
-            print("  ※ 주문가능현금이 0원입니다. KIS 모의투자 사이트에서 예수금 확인 필요")
-    else:
-        print("  ❌ 계좌 요약 조회 실패 (로그에서 에러 확인)")
+    print(f"  예수금      : {balance.deposit:>15,.0f} 원")
+    print(f"  총평가금액  : {balance.total_balance:>15,.0f} 원")
+    print(f"  총손익      : {balance.profit_loss:>+15,.0f} 원")
+    print(f"  총수익률    : {balance.profit_loss_rate:>+14.2f} %")
+    print(f"  주문가능현금: {balance.available_balance:>15,.0f} 원")
 
-    print(f"\n  보유종목 ({len(portfolio)}개):")
-    if portfolio:
-        for s in portfolio:
+    print(f"\n  보유종목 ({len(positions)}개):")
+    if positions:
+        for p in positions:
             print(
-                f"    {s['stock_name']}({s['stock_code']}) "
-                f"{s['quantity']}주  "
-                f"평균 {s['avg_price']:,.0f}원  "
-                f"현재 {s['current_price']:,.0f}원  "
-                f"손익 {s['profit_rate']:+.2f}%"
+                f"    {p.symbol}  {p.quantity}주  "
+                f"평균 {p.average_price:,.0f}원  "
+                f"현재 {p.current_price:,.0f}원  "
+                f"손익 {p.profit_loss_rate:+.2f}%"
             )
     else:
         print("    보유 종목 없음")
 
-    return portfolio, summary
+    return positions, balance
 
 
 # ──────────────────────────────────────────────
@@ -77,14 +71,10 @@ async def show_balance():
 async def show_price(stock_code: str):
     print(f"\n현재가 조회: {stock_code}")
     async with AsyncTradingContext("demo", BUY_AMOUNT) as trader:
-        price_info = await asyncio.to_thread(trader.get_current_price, stock_code)
+        price = await trader.get_current_price(stock_code)
 
-    if price_info:
-        price = price_info.get("current_price") or price_info.get("last") or 0
-        print(f"  → {stock_code} 현재가: {int(price):,} 원")
-    else:
-        print(f"  → 현재가 조회 실패")
-    return price_info
+    print(f"  → {stock_code} 현재가: {int(price.current_price):,} 원  ({price.change_rate:+.2f}%)")
+    return price
 
 
 # ──────────────────────────────────────────────
