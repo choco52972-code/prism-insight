@@ -13,7 +13,7 @@ import time
 import threading
 import warnings
 from base64 import b64decode
-from collections import namedtuple
+from collections import namedtuple, deque
 from collections.abc import Callable
 from datetime import datetime
 from io import StringIO
@@ -392,6 +392,28 @@ _last_auth_time = datetime.now()
 # the 1-per-minute rate limit (EGW00133) when multiple stocks initialize in parallel.
 _token_request_locks: dict = {}
 _token_request_locks_mutex = threading.Lock()
+
+# Global KIS API rate limiter (sliding window, thread-safe).
+# EGW00201 occurs when multiple concurrent callers (data_enricher + MCP tools) exceed
+# KIS's per-second transaction limit. Default: 5 calls/sec (conservative for demo mode).
+# Override via KIS_API_RATE_LIMIT env var.
+_KIS_RATE_LIMIT = int(os.environ.get("KIS_API_RATE_LIMIT", "5"))
+_kis_call_times: deque = deque()
+_kis_rate_lock = threading.Lock()
+
+
+def _kis_rate_limit_wait():
+    """Block until a KIS API call slot is available (sliding window, 1-second window)."""
+    while True:
+        with _kis_rate_lock:
+            now = time.monotonic()
+            while _kis_call_times and now - _kis_call_times[0] >= 1.0:
+                _kis_call_times.popleft()
+            if len(_kis_call_times) < _KIS_RATE_LIMIT:
+                _kis_call_times.append(now)
+                return
+            wait_time = 1.0 - (now - _kis_call_times[0])
+        time.sleep(max(wait_time, 0.01))
 
 
 def _get_token_lock(lock_key: str) -> threading.Lock:
@@ -1341,6 +1363,7 @@ class APIRespError(APIResp):
 def _url_fetch(
         api_url, ptr_id, tr_cont, params, appendHeaders=None, postFlag=False, hashFlag=True
 ):
+    _kis_rate_limit_wait()
     url = f"{getTREnv().my_url}{api_url}"
 
     headers = _getBaseHeader()  # Organize basic header values
