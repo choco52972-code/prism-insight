@@ -1497,13 +1497,23 @@ class DomesticStockTrading:
                     # This includes deposit (D+0) + D+1 + D+2 receivables
                     total_cash = tot_evlu_amt - scts_evlu_amt
 
+                    # ord_psbl_cash is not provided in VTS (demo) accounts.
+                    # Approximate with: next-day settlement - today's buys + today's sells - today's tax/fees
+                    ord_psbl_cash = float(output2.get('ord_psbl_cash', 0))
+                    if ord_psbl_cash == 0:
+                        nxdy_excc_amt = float(output2.get('nxdy_excc_amt', 0))
+                        thdt_buy_amt = float(output2.get('thdt_buy_amt', 0))
+                        thdt_sll_amt = float(output2.get('thdt_sll_amt', 0))
+                        thdt_tlex_amt = float(output2.get('thdt_tlex_amt', 0))
+                        ord_psbl_cash = max(0.0, nxdy_excc_amt - thdt_buy_amt + thdt_sll_amt - thdt_tlex_amt)
+
                     account_summary = {
                         'total_eval_amount': tot_evlu_amt,
                         'total_profit_amount': float(output2.get('evlu_pfls_smtl_amt', 0)),
                         'total_profit_rate': round(float(output2.get('evlu_pfls_smtl_amt', 0)) / pchs_amt * 100, 2),
                         'deposit': dnca_tot_amt,  # Deposit (D+0, same-day withdrawal available)
                         'total_cash': total_cash,  # Total cash (including D+2)
-                        'available_amount': float(output2.get('ord_psbl_cash', 0))
+                        'available_amount': ord_psbl_cash
                     }
 
                     logger.info(f"Account summary: Total eval {account_summary['total_eval_amount']:,.0f} KRW, "
