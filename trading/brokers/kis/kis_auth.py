@@ -4,6 +4,7 @@
 
 import asyncio
 import copy
+import fcntl
 import json
 import logging
 import os
@@ -13,7 +14,7 @@ import time
 import threading
 import warnings
 from base64 import b64decode
-from collections import namedtuple, deque
+from collections import namedtuple
 from collections.abc import Callable
 from datetime import datetime
 from io import StringIO
@@ -393,26 +394,44 @@ _last_auth_time = datetime.now()
 _token_request_locks: dict = {}
 _token_request_locks_mutex = threading.Lock()
 
-# Global KIS API rate limiter (sliding window, thread-safe).
-# EGW00201 occurs when multiple concurrent callers (data_enricher + MCP tools) exceed
-# KIS's per-second transaction limit. Default: 5 calls/sec (conservative for demo mode).
-# Override via KIS_API_RATE_LIMIT env var.
+# Cross-process KIS API rate limiter (sliding window, file-based lock).
+# EGW00201 occurs when multiple processes (prism-insight + kospi_kosdaq MCP server)
+# simultaneously call KIS API. In-process threading.Lock is insufficient — file-based
+# fcntl.flock coordinates across all processes sharing this module.
+# Default: 5 calls/sec. Override via KIS_API_RATE_LIMIT env var.
 _KIS_RATE_LIMIT = int(os.environ.get("KIS_API_RATE_LIMIT", "5"))
-_kis_call_times: deque = deque()
-_kis_rate_lock = threading.Lock()
+_KIS_RATE_STATE_FILE = "/tmp/kis_api_rate_state.json"
+_KIS_RATE_LOCK_FILE = "/tmp/kis_api_rate.lock"
 
 
 def _kis_rate_limit_wait():
-    """Block until a KIS API call slot is available (sliding window, 1-second window)."""
+    """Block until a KIS API call slot is available.
+
+    Uses fcntl.flock for cross-process coordination so that the prism-insight
+    main process and the kospi_kosdaq MCP server process share the same 1-second
+    sliding window quota.
+    """
     while True:
-        with _kis_rate_lock:
-            now = time.monotonic()
-            while _kis_call_times and now - _kis_call_times[0] >= 1.0:
-                _kis_call_times.popleft()
-            if len(_kis_call_times) < _KIS_RATE_LIMIT:
-                _kis_call_times.append(now)
-                return
-            wait_time = 1.0 - (now - _kis_call_times[0])
+        with open(_KIS_RATE_LOCK_FILE, "a") as lockf:
+            fcntl.flock(lockf, fcntl.LOCK_EX)
+            try:
+                now = time.time()
+                try:
+                    with open(_KIS_RATE_STATE_FILE, "r") as f:
+                        calls = [t for t in json.load(f).get("calls", []) if now - t < 1.0]
+                except (FileNotFoundError, json.JSONDecodeError, ValueError):
+                    calls = []
+
+                if len(calls) < _KIS_RATE_LIMIT:
+                    calls.append(now)
+                    with open(_KIS_RATE_STATE_FILE, "w") as f:
+                        json.dump({"calls": calls}, f)
+                    return
+
+                wait_time = 1.0 - (now - calls[0])
+            finally:
+                fcntl.flock(lockf, fcntl.LOCK_UN)
+
         time.sleep(max(wait_time, 0.01))
 
 
