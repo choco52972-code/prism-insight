@@ -124,6 +124,18 @@ class TokenManager:
 
             return self._auth_data["access_token"]
 
+    async def force_refresh(self) -> str:
+        """Force token refresh regardless of expiry.
+
+        Called when the server returns token_invalidated (server-side revocation).
+        Returns the new access_token string.
+        """
+        async with self._lock:
+            if self._auth_data is None:
+                self._auth_data = self._load_from_disk()
+            self._auth_data = await self._refresh_token(self._auth_data)
+            return self._auth_data["access_token"]
+
     async def get_account_id(self) -> str:
         """Get the account ID."""
         async with self._lock:

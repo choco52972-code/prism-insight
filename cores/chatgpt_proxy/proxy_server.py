@@ -132,6 +132,16 @@ async def handle_responses(request: web.Request) -> web.Response:
                             except json.JSONDecodeError:
                                 error_body = {"error": {"message": raw_body}}
 
+                            error_code = error_body.get("error", {}).get("code", "")
+                            if resp.status == 401 and error_code == "token_invalidated" and attempt < _PROXY_MAX_RETRIES:
+                                logger.warning("token_invalidated — forcing token refresh and retrying (attempt %d)...", attempt)
+                                try:
+                                    token = await _token_manager.force_refresh()
+                                    headers["Authorization"] = f"Bearer {token}"
+                                    continue
+                                except Exception as refresh_err:
+                                    logger.error("Token force-refresh failed: %s", refresh_err)
+
                             translated_error, status = api_translator.translate_error(error_body, resp.status)
                             logger.warning("ChatGPT API error (%d): %s", resp.status, raw_body[:200])
                             return web.json_response(translated_error, status=status)
@@ -252,6 +262,16 @@ async def handle_chat_completions(request: web.Request) -> web.Response:
                                 error_body = json.loads(raw_body)
                             except json.JSONDecodeError:
                                 error_body = {"error": {"message": raw_body}}
+
+                            error_code = error_body.get("error", {}).get("code", "")
+                            if resp.status == 401 and error_code == "token_invalidated" and attempt < _PROXY_MAX_RETRIES:
+                                logger.warning("token_invalidated — forcing token refresh and retrying (attempt %d)...", attempt)
+                                try:
+                                    token = await _token_manager.force_refresh()
+                                    headers["Authorization"] = f"Bearer {token}"
+                                    continue
+                                except Exception as refresh_err:
+                                    logger.error("Token force-refresh failed: %s", refresh_err)
 
                             translated_error, status = api_translator.translate_error(error_body, resp.status)
                             logger.warning("ChatGPT API error (%d): %s", resp.status, raw_body[:200])
