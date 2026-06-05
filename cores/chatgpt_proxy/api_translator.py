@@ -165,7 +165,7 @@ def translate_response(response_body: dict, model: str) -> dict:
     - usage fields mapped
     """
     resp_id = response_body.get("id", "resp_unknown")
-    output = response_body.get("output", [])
+    output = response_body.get("output") or []
 
     message: dict[str, Any] = {"role": "assistant"}
     tool_calls = []
@@ -173,11 +173,15 @@ def translate_response(response_body: dict, model: str) -> dict:
     finish_reason = "stop"
 
     for item in output:
+        if not isinstance(item, dict):
+            continue
         item_type = item.get("type", "")
 
         if item_type == "message":
             # Extract text from content array
-            for content in item.get("content", []):
+            for content in item.get("content") or []:
+                if not isinstance(content, dict):
+                    continue
                 if content.get("type") == "output_text":
                     text_parts.append(content.get("text", ""))
 
@@ -201,7 +205,7 @@ def translate_response(response_body: dict, model: str) -> dict:
         message["tool_calls"] = tool_calls
 
     # Map usage
-    usage_in = response_body.get("usage", {})
+    usage_in = response_body.get("usage") or {}
     usage_out = {
         "prompt_tokens": usage_in.get("input_tokens", 0),
         "completion_tokens": usage_in.get("output_tokens", 0),

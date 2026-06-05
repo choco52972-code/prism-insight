@@ -743,12 +743,13 @@ class DomesticStockTrading:
                 'message': f"Error during reserved buy order: {str(e)}"
             }
 
-    def sell_all_market_price(self, stock_code: str) -> Dict[str, Any]:
+    def sell_all_market_price(self, stock_code: str, quantity: Optional[int] = None) -> Dict[str, Any]:
         """
         Sell all at market price (liquidate entire holding)
 
         Args:
             stock_code: Stock code
+            quantity: Shares to sell (all holdings if None)
 
         Returns:
             {
@@ -780,6 +781,8 @@ class DomesticStockTrading:
                 'quantity': 0,
                 'message': 'No holding quantity'
             }
+
+        buy_quantity = min(quantity, buy_quantity) if quantity else buy_quantity
 
         # Execute sell order
         api_url = "/uapi/domestic-stock/v1/trading/order-cash"
@@ -840,7 +843,7 @@ class DomesticStockTrading:
                 'message': f'Error during sell order: {str(e)}'
             }
 
-    def smart_sell_all(self, stock_code: str, limit_price: int = None) -> Dict[str, Any]:
+    def smart_sell_all(self, stock_code: str, limit_price: int = None, quantity: Optional[int] = None) -> Dict[str, Any]:
         """
         Automatically sell all using the optimal method based on time (excluding after-hours single price trading due to high unfilled probability)
 
@@ -851,6 +854,7 @@ class DomesticStockTrading:
         Args:
             stock_code: Stock code
             limit_price: Limit price for reserved order (market order if None)
+            quantity: Shares to sell (all holdings if None)
 
         Returns:
             Sell result
@@ -872,12 +876,12 @@ class DomesticStockTrading:
         if datetime.time(9, 0) <= current_time <= datetime.time(15, 30):
             # Regular trading hours - market sell
             logger.info(f"[{stock_code}] Regular trading hours - executing market sell")
-            return self.sell_all_market_price(stock_code)
+            return self.sell_all_market_price(stock_code, quantity=quantity)
 
         elif datetime.time(15, 40) <= current_time <= datetime.time(16, 0):
             # After-hours closing price trading
             logger.info(f"[{stock_code}] After-hours closing price time - executing closing price sell")
-            return self.sell_all_closing_price(stock_code)
+            return self.sell_all_closing_price(stock_code, quantity=quantity)
 
         else:
             # Reserved order (limit or market price)
@@ -885,9 +889,9 @@ class DomesticStockTrading:
                 logger.info(f"[{stock_code}] Outside trading hours - executing reserved order (limit: {limit_price:,} KRW)")
             else:
                 logger.info(f"[{stock_code}] Outside trading hours - executing reserved order (market)")
-            return self.sell_all_reserved_order(stock_code, limit_price=limit_price)
+            return self.sell_all_reserved_order(stock_code, limit_price=limit_price, quantity=quantity)
 
-    def sell_all_closing_price(self, stock_code: str) -> Dict[str, Any]:
+    def sell_all_closing_price(self, stock_code: str, quantity: Optional[int] = None) -> Dict[str, Any]:
         """
         Sell all at after-hours closing price (15:40~16:00)
         Sell at closing price of the day
@@ -912,6 +916,8 @@ class DomesticStockTrading:
                 'quantity': 0,
                 'message': 'No holding quantity'
             }
+
+        buy_quantity = min(quantity, buy_quantity) if quantity else buy_quantity
 
         # After-hours closing price sell
         api_url = "/uapi/domestic-stock/v1/trading/order-cash"
@@ -968,7 +974,7 @@ class DomesticStockTrading:
                 'message': f'Error during sell: {str(e)}'
             }
 
-    def sell_all_reserved_order(self, stock_code: str, end_date: str = None, limit_price: int = None) -> Dict[str, Any]:
+    def sell_all_reserved_order(self, stock_code: str, end_date: str = None, limit_price: int = None, quantity: Optional[int] = None) -> Dict[str, Any]:
         """
         Sell all with reserved order (auto-execute on next trading day)
         Reserved order available: 15:40~next business day 07:30 (excluding 23:40~00:10)
@@ -1001,6 +1007,8 @@ class DomesticStockTrading:
                 'quantity': 0,
                 'message': 'No holding quantity'
             }
+
+        buy_quantity = min(quantity, buy_quantity) if quantity else buy_quantity
 
         # Set order type and unit price
         if limit_price and limit_price > 0:
@@ -1172,9 +1180,17 @@ class DomesticStockTrading:
                         buy_quantity = math.floor(amount / current_price)
 
                         if buy_quantity == 0:
-                            result['message'] = f'Buyable quantity is 0 (buy amount: {amount:,} KRW)'
-                            logger.warning(f"[Async Buy API] {stock_code} buyable quantity 0")
-                            return result
+                            if current_price > 0:
+                                # Single share costs more than budget — buy 1 share
+                                buy_quantity = 1
+                                logger.info(
+                                    f"[Async Buy API] {stock_code} price ({current_price:,} KRW) "
+                                    f"exceeds budget ({amount:,} KRW), falling back to 1 share"
+                                )
+                            else:
+                                result['message'] = f'Buyable quantity is 0 (buy amount: {amount:,} KRW)'
+                                logger.warning(f"[Async Buy API] {stock_code} buyable quantity 0")
+                                return result
 
                         result['quantity'] = buy_quantity
                         result['total_amount'] = buy_quantity * current_price_info['current_price']
@@ -1212,15 +1228,15 @@ class DomesticStockTrading:
 
         return result
 
-    async def async_sell_stock(self, stock_code: str, timeout: float = 30.0, limit_price: Optional[int] = None) -> Dict[str, Any]:
+    async def async_sell_stock(self, stock_code: str, timeout: float = 30.0, limit_price: Optional[int] = None, quantity: Optional[int] = None) -> Dict[str, Any]:
         """
         Async sell API (with timeout)
-        Sell all holding quantity at market price
 
         Args:
             stock_code: Stock code (6 digits)
             timeout: Timeout in seconds
             limit_price: Limit price for reserved order (market order if None)
+            quantity: Shares to sell (all holdings if None)
 
         Returns:
             {
@@ -1236,7 +1252,7 @@ class DomesticStockTrading:
         """
         try:
             return await asyncio.wait_for(
-                self._execute_sell_stock(stock_code, limit_price),
+                self._execute_sell_stock(stock_code, limit_price, quantity),
                 timeout=timeout
             )
         except asyncio.TimeoutError:
@@ -1251,7 +1267,7 @@ class DomesticStockTrading:
                 'timestamp': datetime.datetime.now().isoformat()
             }
 
-    async def _execute_sell_stock(self, stock_code: str, limit_price: int = None) -> Dict[str, Any]:
+    async def _execute_sell_stock(self, stock_code: str, limit_price: int = None, quantity: Optional[int] = None) -> Dict[str, Any]:
         """Actual sell execution logic (includes portfolio verification defensive logic)"""
         result = {
             'success': False,
@@ -1320,12 +1336,13 @@ class DomesticStockTrading:
                         # CRITICAL: Convert to int - KIS API requires integer strings, not float strings
                         effective_limit_price = int(limit_price) if (limit_price and limit_price > 0) else (int(result['current_price']) if result['current_price'] > 0 else None)
 
+                        sell_quantity = min(quantity, holding_quantity) if quantity else holding_quantity
                         if effective_limit_price:
-                            logger.info(f"[Async Sell API] {stock_code} executing sell all (holding: {holding_quantity} shares, limit: {effective_limit_price:,} KRW)")
+                            logger.info(f"[Async Sell API] {stock_code} executing sell {sell_quantity} shares (holding: {holding_quantity}, limit: {effective_limit_price:,} KRW)")
                         else:
-                            logger.info(f"[Async Sell API] {stock_code} executing sell all (holding: {holding_quantity} shares, market)")
+                            logger.info(f"[Async Sell API] {stock_code} executing sell {sell_quantity} shares (holding: {holding_quantity}, market)")
                         all_sell_result = await asyncio.to_thread(
-                            self.smart_sell_all, stock_code, effective_limit_price
+                            self.smart_sell_all, stock_code, effective_limit_price, sell_quantity
                         )
 
                         if all_sell_result['success']:
@@ -1584,7 +1601,7 @@ class MultiAccountDomesticStockTrading:
 
         return self._aggregate_results(stock_code, results, action="buy")
 
-    async def async_sell_stock(self, stock_code: str, timeout: float = 30.0, limit_price: Optional[int] = None) -> Dict[str, Any]:
+    async def async_sell_stock(self, stock_code: str, timeout: float = 30.0, limit_price: Optional[int] = None, quantity: Optional[int] = None) -> Dict[str, Any]:
         if not self.account_configs:
             return self._aggregate_results(stock_code, [], action="sell")
         results = []
@@ -1594,6 +1611,7 @@ class MultiAccountDomesticStockTrading:
                 stock_code=stock_code,
                 timeout=timeout,
                 limit_price=limit_price,
+                quantity=quantity,
             )
             result["account_name"] = account["name"]
             result["account_key"] = account["account_key"]
