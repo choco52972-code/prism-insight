@@ -1234,7 +1234,7 @@ class DomesticStockTrading:
 
         Args:
             stock_code: Stock code (6 digits)
-            timeout: Timeout in seconds
+            timeout: Timeout in seconds (applies only to order submission, not pre-checks)
             limit_price: Limit price for reserved order (market order if None)
             quantity: Shares to sell (all holdings if None)
 
@@ -1250,25 +1250,6 @@ class DomesticStockTrading:
                 'timestamp': Execution time
             }
         """
-        try:
-            return await asyncio.wait_for(
-                self._execute_sell_stock(stock_code, limit_price, quantity),
-                timeout=timeout
-            )
-        except asyncio.TimeoutError:
-            return {
-                'success': False,
-                'stock_code': stock_code,
-                'current_price': 0,
-                'quantity': 0,
-                'estimated_amount': 0,
-                'order_no': None,
-                'message': f'Sell request timeout ({timeout}s)',
-                'timestamp': datetime.datetime.now().isoformat()
-            }
-
-    async def _execute_sell_stock(self, stock_code: str, limit_price: int = None, quantity: Optional[int] = None) -> Dict[str, Any]:
-        """Actual sell execution logic (includes portfolio verification defensive logic)"""
         result = {
             'success': False,
             'stock_code': stock_code,
@@ -1280,6 +1261,59 @@ class DomesticStockTrading:
             'timestamp': datetime.datetime.now().isoformat()
         }
 
+        # Portfolio verification and current price lookup run before the timeout window
+        # so slow KIS data queries don't consume the budget reserved for order submission.
+        logger.info(f"[Async Sell API] {stock_code} sell process started")
+        logger.info(f"[Async Sell API] {stock_code} checking portfolio...")
+        current_portfolio = await asyncio.to_thread(self.get_portfolio)
+
+        target_stock = None
+        for current_stock in current_portfolio:
+            if current_stock['stock_code'] == stock_code:
+                target_stock = current_stock
+                break
+
+        if not target_stock:
+            result['message'] = f'Stock {stock_code} not found in portfolio'
+            logger.warning(f"[Async Sell API] {stock_code} not in portfolio")
+            return result
+
+        if target_stock['quantity'] <= 0:
+            result['message'] = f'{stock_code} holding quantity is 0'
+            logger.warning(f"[Async Sell API] {stock_code} holding quantity 0")
+            return result
+
+        logger.info(f"[Async Sell API] {stock_code} holding confirmed: {target_stock['quantity']} shares")
+
+        current_price_info = await asyncio.to_thread(self.get_current_price, stock_code)
+        if current_price_info:
+            result['current_price'] = current_price_info['current_price']
+            logger.info(f"[Async Sell API] {stock_code} current price: {current_price_info['current_price']:,} KRW")
+
+        # Only order submission runs inside the timeout window
+        try:
+            return await asyncio.wait_for(
+                self._execute_sell_stock(stock_code, limit_price, quantity, result, target_stock),
+                timeout=timeout
+            )
+        except asyncio.TimeoutError:
+            result['message'] = f'Sell request timeout ({timeout}s)'
+            return result
+
+    async def _execute_sell_stock(self, stock_code: str, limit_price: int = None, quantity: Optional[int] = None, result: Dict[str, Any] = None, target_stock: Dict[str, Any] = None) -> Dict[str, Any]:
+        """Actual sell order submission (portfolio/price pre-checks done in async_sell_stock)"""
+        if result is None:
+            result = {
+                'success': False,
+                'stock_code': stock_code,
+                'current_price': 0,
+                'quantity': 0,
+                'estimated_amount': 0,
+                'order_no': None,
+                'message': '',
+                'timestamp': datetime.datetime.now().isoformat()
+            }
+
         # 3-level protection: per-stock lock + semaphore + global lock
         stock_lock = await self._get_stock_lock(stock_code)
 
@@ -1287,41 +1321,7 @@ class DomesticStockTrading:
             async with self._semaphore:  # Level 2: Limit total concurrent requests
                 async with self._global_lock:  # Level 3: Protect account information
                     try:
-                        logger.info(f"[Async Sell API] {stock_code} sell process started")
-
-                        # Defensive logic 1: Verify holding in portfolio
-                        logger.info(f"[Async Sell API] {stock_code} checking portfolio...")
-                        current_portfolio = await asyncio.to_thread(self.get_portfolio)
-
-                        # Check if stock exists in portfolio
-                        target_stock = None
-                        for current_stock in current_portfolio:
-                            if current_stock['stock_code'] == stock_code:
-                                target_stock = current_stock
-                                break
-
-                        if not target_stock:
-                            result['message'] = f'Stock {stock_code} not found in portfolio'
-                            logger.warning(f"[Async Sell API] {stock_code} not in portfolio")
-                            return result
-
-                        if target_stock['quantity'] <= 0:
-                            result['message'] = f'{stock_code} holding quantity is 0'
-                            logger.warning(f"[Async Sell API] {stock_code} holding quantity 0")
-                            return result
-
-                        logger.info(f"[Async Sell API] {stock_code} holding confirmed: {target_stock['quantity']} shares")
-
-                        # Get current price (for estimated sell amount calculation)
-                        current_price_info = await asyncio.to_thread(
-                            self.get_current_price, stock_code
-                        )
-
-                        if current_price_info:
-                            result['current_price'] = current_price_info['current_price']
-                            logger.info(f"[Async Sell API] {stock_code} current price: {current_price_info['current_price']:,} KRW")
-
-                        # Defensive logic 2: Check holding quantity once more before selling
+                        # Defensive final check: re-verify holding quantity before submitting order
                         holding_quantity = await asyncio.to_thread(
                             self.get_holding_quantity, stock_code
                         )
@@ -1331,7 +1331,7 @@ class DomesticStockTrading:
                             logger.warning(f"[Async Sell API] {stock_code} holding quantity 0 at final check")
                             return result
 
-                        # Execute sell all
+                        # Execute sell
                         # Use current_price as limit_price fallback for reserved orders (outside market hours)
                         # CRITICAL: Convert to int - KIS API requires integer strings, not float strings
                         effective_limit_price = int(limit_price) if (limit_price and limit_price > 0) else (int(result['current_price']) if result['current_price'] > 0 else None)
@@ -1355,14 +1355,15 @@ class DomesticStockTrading:
                                 result['estimated_amount'] = result['quantity'] * result['current_price']
 
                             # Add portfolio information
-                            result['avg_price'] = target_stock['avg_price']
-                            result['profit_amount'] = target_stock['profit_amount']
-                            result['profit_rate'] = target_stock['profit_rate']
+                            if target_stock:
+                                result['avg_price'] = target_stock['avg_price']
+                                result['profit_amount'] = target_stock['profit_amount']
+                                result['profit_rate'] = target_stock['profit_rate']
 
                             result['message'] = (f"Sell completed: {result['quantity']} shares "
-                                                 f"(avg price: {result['avg_price']:,.0f} KRW, "
+                                                 f"(avg price: {result.get('avg_price', 0):,.0f} KRW, "
                                                  f"estimated amount: {result['estimated_amount']:,} KRW, "
-                                                 f"return: {result['profit_rate']:+.2f}%)")
+                                                 f"return: {result.get('profit_rate', 0):+.2f}%)")
 
                             logger.info(f"[Async Sell API] {stock_code} sell successful")
                         else:

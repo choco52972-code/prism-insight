@@ -532,50 +532,55 @@ class EnhancedStockTrackingAgent(StockTrackingAgent):
 
                 # Process buy if entry decision
                 if decision == "Enter" and buy_score >= min_score and sector_diverse:
-                    # Process buy (is_add => pyramiding additional independent row, #288)
-                    buy_success = await self.buy_stock(ticker, company_name, current_price, scenario, rank_change_msg, is_add=is_add)
+                    # Validate pre-conditions before calling KIS API (#288)
+                    if not await self._validate_buy_preconditions(ticker, scenario, is_add=is_add):
+                        logger.warning(f"Purchase pre-conditions not met: {company_name}({ticker})")
+                        continue
 
-                    if buy_success:
-                        # Call actual account trading function (async)
-                        from trading.domestic_stock_trading import AsyncTradingContext
-                        async with AsyncTradingContext() as trading:
-                            # Execute async buy with limit price for reserved orders
-                            trade_result = await trading.async_buy_stock(stock_code=ticker, limit_price=current_price)
+                    # Call KIS API first; only update DB on success
+                    from trading.domestic_stock_trading import AsyncTradingContext
+                    async with AsyncTradingContext() as trading:
+                        # Execute async buy with limit price for reserved orders
+                        trade_result = await trading.async_buy_stock(stock_code=ticker, limit_price=current_price)
 
-                        if trade_result['success']:
-                            logger.info(f"Actual purchase successful: {trade_result['message']}")
-                        else:
-                            logger.error(f"Actual purchase failed: {trade_result['message']}")
+                    if trade_result['success']:
+                        logger.info(f"Actual purchase successful: {trade_result['message']}")
+                        # DB insert only after KIS API succeeds (is_add => pyramiding, #288)
+                        buy_success = await self.buy_stock(ticker, company_name, current_price, scenario, rank_change_msg, is_add=is_add)
+                    else:
+                        logger.error(f"Actual purchase failed: {trade_result['message']}")
+                        buy_success = False
+                        await self._send_trade_failure_alert("buy", ticker, company_name, trade_result['message'])
 
-                        # [Optional] Publish buy signal via Redis Streams
-                        # Auto-skipped if Redis not configured (requires UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN)
-                        try:
-                            from messaging.redis_signal_publisher import publish_buy_signal
-                            await publish_buy_signal(
-                                ticker=ticker,
-                                company_name=company_name,
-                                price=current_price,
-                                scenario=scenario,
-                                source="AI Analysis",
-                                trade_result=trade_result
-                            )
-                        except Exception as signal_err:
-                            logger.warning(f"Buy signal publish failed (non-critical): {signal_err}")
+                    # [Optional] Publish buy signal via Redis Streams
+                    # Auto-skipped if Redis not configured (requires UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN)
+                    try:
+                        from messaging.redis_signal_publisher import publish_buy_signal
+                        await publish_buy_signal(
+                            ticker=ticker,
+                            company_name=company_name,
+                            price=current_price,
+                            scenario=scenario,
+                            source="AI Analysis",
+                            trade_result=trade_result
+                        )
+                    except Exception as signal_err:
+                        logger.warning(f"Buy signal publish failed (non-critical): {signal_err}")
 
-                        # [Optional] Publish buy signal via GCP Pub/Sub
-                        # Auto-skipped if GCP not configured (requires GCP_PROJECT_ID, GCP_PUBSUB_TOPIC_ID)
-                        try:
-                            from messaging.gcp_pubsub_signal_publisher import publish_buy_signal as gcp_publish_buy_signal
-                            await gcp_publish_buy_signal(
-                                ticker=ticker,
-                                company_name=company_name,
-                                price=current_price,
-                                scenario=scenario,
-                                source="AI Analysis",
-                                trade_result=trade_result
-                            )
-                        except Exception as signal_err:
-                            logger.warning(f"GCP buy signal publish failed (non-critical): {signal_err}")
+                    # [Optional] Publish buy signal via GCP Pub/Sub
+                    # Auto-skipped if GCP not configured (requires GCP_PROJECT_ID, GCP_PUBSUB_TOPIC_ID)
+                    try:
+                        from messaging.gcp_pubsub_signal_publisher import publish_buy_signal as gcp_publish_buy_signal
+                        await gcp_publish_buy_signal(
+                            ticker=ticker,
+                            company_name=company_name,
+                            price=current_price,
+                            scenario=scenario,
+                            source="AI Analysis",
+                            trade_result=trade_result
+                        )
+                    except Exception as signal_err:
+                        logger.warning(f"GCP buy signal publish failed (non-critical): {signal_err}")
 
                     if buy_success:
                         buy_count += 1

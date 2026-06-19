@@ -701,6 +701,26 @@ class StockTrackingAgent:
             logger.error(traceback.format_exc())
             return False
 
+    async def _validate_buy_preconditions(self, ticker: str, scenario: Dict[str, Any], is_add: bool = False) -> bool:
+        """Check buy pre-conditions before calling KIS API"""
+        if not is_add and await self._is_ticker_in_holdings(ticker):
+            logger.warning(f"{ticker} already in holdings")
+            return False
+        current_slots = await self._get_current_slots_count()
+        if current_slots >= self.max_slots:
+            logger.warning(f"Holdings already at maximum ({self.max_slots})")
+            return False
+        max_portfolio_size = scenario.get('max_portfolio_size', self.max_slots)
+        if isinstance(max_portfolio_size, str):
+            try:
+                max_portfolio_size = int(max_portfolio_size)
+            except (ValueError, TypeError):
+                max_portfolio_size = self.max_slots
+        if current_slots >= max_portfolio_size:
+            logger.warning(f"Reached market-based max portfolio size ({max_portfolio_size}). Current holdings: {current_slots}")
+            return False
+        return True
+
     async def buy_stock(self, ticker: str, company_name: str, current_price: float, scenario: Dict[str, Any], rank_change_msg: str = "", is_add: bool = False) -> bool:
         """
         Process stock purchase
@@ -718,29 +738,6 @@ class StockTrackingAgent:
             bool: Purchase success status
         """
         try:
-            # Check if already holding (skipped for a pyramiding add)
-            if not is_add and await self._is_ticker_in_holdings(ticker):
-                logger.warning(f"{ticker}({company_name}) already in holdings")
-                return False
-
-            # Check available slots
-            current_slots = await self._get_current_slots_count()
-            if current_slots >= self.max_slots:
-                logger.warning(f"Holdings already at maximum ({self.max_slots})")
-                return False
-
-            # Check market-based maximum portfolio size
-            max_portfolio_size = scenario.get('max_portfolio_size', self.max_slots)
-            # Convert to int if stored as string
-            if isinstance(max_portfolio_size, str):
-                try:
-                    max_portfolio_size = int(max_portfolio_size)
-                except (ValueError, TypeError):
-                    max_portfolio_size = self.max_slots
-            if current_slots >= max_portfolio_size:
-                logger.warning(f"Reached market-based max portfolio size ({max_portfolio_size}). Current holdings: {current_slots}")
-                return False
-
             # Current time
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             account_key, account_name = self._account_scope()
@@ -1296,80 +1293,80 @@ class StockTrackingAgent:
                         self.cursor, ticker, account_key=stock.get("account_key")
                     ).get("row_count", 1)
 
-                    # Process sell (deletes only this row when N>1, else the ticker)
-                    sell_success = await self.sell_stock(stock, sell_reason)
-
-                    if sell_success:
-                        # Call actual account trading function (async)
-                        from trading.domestic_stock_trading import AsyncTradingContext
-                        async with AsyncTradingContext(account_name=stock.get("account_name")) as trading:
-                            # Determine fractional sell quantity for multi-row tickers.
-                            # FIX 2: snapshot total qty once per ticker per pass and
-                            # distribute from (snapshot - already_ordered), so fills
-                            # that haven't settled yet cannot cause an over-sell.
-                            sell_quantity = None
-                            # Multi-row tickers sell fractionally. The FINAL row of a
-                            # ticker already split THIS pass (remaining_rows==1 but
-                            # ticker in pass_total_qty) must also sell from the snapshot
-                            # remainder (available), NOT re-query the broker — otherwise,
-                            # if the earlier limit orders are still unfilled, get_holding_quantity
-                            # returns the full position and the last row over-sells (#288 FIX 2).
-                            # Genuinely single-row tickers (never split) keep quantity=None → sell_all.
-                            if remaining_rows > 1 or ticker in pass_total_qty:
-                                if ticker not in pass_total_qty:
-                                    pass_total_qty[ticker] = await asyncio.to_thread(
-                                        trading.get_holding_quantity, ticker
-                                    )
-                                    pass_sold_qty[ticker] = 0
-                                available = pass_total_qty[ticker] - pass_sold_qty[ticker]
-                                sell_quantity = compute_fractional_sell_quantity(available, remaining_rows)
-                                pass_sold_qty[ticker] += sell_quantity
-                                logger.info(
-                                    f"{ticker} pyramiding fractional sell: {sell_quantity} shares "
-                                    f"(available {available} of snapshot {pass_total_qty[ticker]}, "
-                                    f"remaining rows={remaining_rows})"
+                    # Call KIS API first; only update DB on success
+                    from trading.domestic_stock_trading import AsyncTradingContext
+                    async with AsyncTradingContext(account_name=stock.get("account_name")) as trading:
+                        # Determine fractional sell quantity for multi-row tickers.
+                        # FIX 2: snapshot total qty once per ticker per pass and
+                        # distribute from (snapshot - already_ordered), so fills
+                        # that haven't settled yet cannot cause an over-sell.
+                        sell_quantity = None
+                        # Multi-row tickers sell fractionally. The FINAL row of a
+                        # ticker already split THIS pass (remaining_rows==1 but
+                        # ticker in pass_total_qty) must also sell from the snapshot
+                        # remainder (available), NOT re-query the broker — otherwise,
+                        # if the earlier limit orders are still unfilled, get_holding_quantity
+                        # returns the full position and the last row over-sells (#288 FIX 2).
+                        # Genuinely single-row tickers (never split) keep quantity=None → sell_all.
+                        if remaining_rows > 1 or ticker in pass_total_qty:
+                            if ticker not in pass_total_qty:
+                                pass_total_qty[ticker] = await asyncio.to_thread(
+                                    trading.get_holding_quantity, ticker
                                 )
-                            # Execute async sell with limit price for reserved orders
-                            trade_result = await trading.async_sell_stock(
-                                stock_code=ticker, limit_price=current_price, quantity=sell_quantity
+                                pass_sold_qty[ticker] = 0
+                            available = pass_total_qty[ticker] - pass_sold_qty[ticker]
+                            sell_quantity = compute_fractional_sell_quantity(available, remaining_rows)
+                            pass_sold_qty[ticker] += sell_quantity
+                            logger.info(
+                                f"{ticker} pyramiding fractional sell: {sell_quantity} shares "
+                                f"(available {available} of snapshot {pass_total_qty[ticker]}, "
+                                f"remaining rows={remaining_rows})"
                             )
+                        # Execute async sell with limit price for reserved orders
+                        trade_result = await trading.async_sell_stock(
+                            stock_code=ticker, limit_price=current_price, quantity=sell_quantity
+                        )
 
-                        if trade_result['success']:
-                            logger.info(f"Actual sell successful: {trade_result['message']}")
-                        else:
-                            logger.error(f"Actual sell failed: {trade_result['message']}")
+                    if trade_result['success']:
+                        logger.info(f"Actual sell successful: {trade_result['message']}")
+                        # Process DB sell only after KIS API succeeds
+                        sell_success = await self.sell_stock(stock, sell_reason)
+                    else:
+                        logger.error(f"Actual sell failed: {trade_result['message']}")
+                        sell_success = False
+                        await self._send_trade_failure_alert("sell", ticker, company_name, trade_result['message'])
 
-                        # [Optional] Publish sell signal via Redis Streams
-                        # Auto-skipped if Redis not configured (requires UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN)
-                        try:
-                            from messaging.redis_signal_publisher import publish_sell_signal
-                            await publish_sell_signal(
-                                ticker=ticker,
-                                company_name=company_name,
-                                price=current_price,
-                                buy_price=stock.get('buy_price', 0),
-                                profit_rate=((current_price - stock.get('buy_price', 0)) / stock.get('buy_price', 0) * 100),
-                                sell_reason=sell_reason,
-                                trade_result=trade_result
-                            )
-                        except Exception as signal_err:
-                            logger.warning(f"Sell signal publish failed (non-critical): {signal_err}")
+                    # [Optional] Publish sell signal via Redis Streams
+                    # Auto-skipped if Redis not configured (requires UPSTASH_REDIS_REST_URL, UPSTASH_REDIS_REST_TOKEN)
+                    try:
+                        from messaging.redis_signal_publisher import publish_sell_signal
+                        await publish_sell_signal(
+                            ticker=ticker,
+                            company_name=company_name,
+                            price=current_price,
+                            buy_price=stock.get('buy_price', 0),
+                            profit_rate=((current_price - stock.get('buy_price', 0)) / stock.get('buy_price', 0) * 100),
+                            sell_reason=sell_reason,
+                            trade_result=trade_result
+                        )
+                    except Exception as signal_err:
+                        logger.warning(f"Sell signal publish failed (non-critical): {signal_err}")
 
-                        # [Optional] Publish sell signal via GCP Pub/Sub
-                        # Auto-skipped if GCP not configured (requires GCP_PROJECT_ID, GCP_PUBSUB_TOPIC_ID)
-                        try:
-                            from messaging.gcp_pubsub_signal_publisher import publish_sell_signal as gcp_publish_sell_signal
-                            await gcp_publish_sell_signal(
-                                ticker=ticker,
-                                company_name=company_name,
-                                price=current_price,
-                                buy_price=stock.get('buy_price', 0),
-                                profit_rate=((current_price - stock.get('buy_price', 0)) / stock.get('buy_price', 0) * 100),
-                                sell_reason=sell_reason,
-                                trade_result=trade_result
-                            )
-                        except Exception as signal_err:
-                            logger.warning(f"GCP sell signal publish failed (non-critical): {signal_err}")
+                    # [Optional] Publish sell signal via GCP Pub/Sub
+                    # Auto-skipped if GCP not configured (requires GCP_PROJECT_ID, GCP_PUBSUB_TOPIC_ID)
+                    try:
+                        from messaging.gcp_pubsub_signal_publisher import publish_sell_signal as gcp_publish_sell_signal
+                        await gcp_publish_sell_signal(
+                            ticker=ticker,
+                            company_name=company_name,
+                            price=current_price,
+                            buy_price=stock.get('buy_price', 0),
+                            profit_rate=((current_price - stock.get('buy_price', 0)) / stock.get('buy_price', 0) * 100),
+                            sell_reason=sell_reason,
+                            trade_result=trade_result
+                        )
+                    except Exception as signal_err:
+                        logger.warning(f"GCP sell signal publish failed (non-critical): {signal_err}")
 
                     if sell_success:
                         account_label = self._safe_account_log_label(
@@ -1619,56 +1616,64 @@ class StockTrackingAgent:
                     logger.info(f"Buy score check: {company_name}({ticker}) - Score: {buy_score}")
 
                     if analysis_result.get("decision") == "Enter":
-                        buy_success = await self.buy_stock(ticker, company_name, current_price, scenario, rank_change_msg)
+                        # Validate pre-conditions before calling KIS API
+                        if not await self._validate_buy_preconditions(ticker, scenario):
+                            state["should_save_watchlist"] = True
+                            state["skip_reason"] = state["skip_reason"] or "Purchase pre-conditions not met"
+                            logger.warning(f"Purchase pre-conditions not met: {company_name}({ticker})")
+                            continue
 
-                        if buy_success:
-                            from trading.domestic_stock_trading import AsyncTradingContext
+                        from trading.domestic_stock_trading import AsyncTradingContext
 
-                            async with AsyncTradingContext(account_name=account["name"]) as trading:
-                                trade_result = await trading.async_buy_stock(stock_code=ticker, limit_price=current_price)
+                        async with AsyncTradingContext(account_name=account["name"]) as trading:
+                            trade_result = await trading.async_buy_stock(stock_code=ticker, limit_price=current_price)
 
-                            if trade_result['success']:
-                                logger.info(f"Actual purchase successful: {trade_result['message']}")
-                            else:
-                                logger.error(f"Actual purchase failed: {trade_result['message']}")
+                        if trade_result['success']:
+                            logger.info(f"Actual purchase successful: {trade_result['message']}")
+                            # DB insert only after KIS API succeeds
+                            buy_success = await self.buy_stock(ticker, company_name, current_price, scenario, rank_change_msg)
+                        else:
+                            logger.error(f"Actual purchase failed: {trade_result['message']}")
+                            buy_success = False
+                            await self._send_trade_failure_alert("buy", ticker, company_name, trade_result['message'])
 
-                            if trade_result.get("partial_success"):
-                                successful = trade_result.get("successful_accounts", [])
-                                failed = trade_result.get("failed_accounts", [])
-                                logger.warning(
-                                    f"{ticker} partial success: {len(successful)}/{len(successful) + len(failed)} accounts"
+                        if trade_result.get("partial_success"):
+                            successful = trade_result.get("successful_accounts", [])
+                            failed = trade_result.get("failed_accounts", [])
+                            logger.warning(
+                                f"{ticker} partial success: {len(successful)}/{len(successful) + len(failed)} accounts"
+                            )
+
+                        if trade_result['success'] and ticker not in signaled_tickers:
+                            try:
+                                from messaging.redis_signal_publisher import publish_buy_signal
+
+                                await publish_buy_signal(
+                                    ticker=ticker,
+                                    company_name=company_name,
+                                    price=current_price,
+                                    scenario=scenario,
+                                    source="AI Analysis",
+                                    trade_result=trade_result
                                 )
+                            except Exception as signal_err:
+                                logger.warning(f"Buy signal publish failed (non-critical): {signal_err}")
 
-                            if ticker not in signaled_tickers:
-                                try:
-                                    from messaging.redis_signal_publisher import publish_buy_signal
+                            try:
+                                from messaging.gcp_pubsub_signal_publisher import publish_buy_signal as gcp_publish_buy_signal
 
-                                    await publish_buy_signal(
-                                        ticker=ticker,
-                                        company_name=company_name,
-                                        price=current_price,
-                                        scenario=scenario,
-                                        source="AI Analysis",
-                                        trade_result=trade_result
-                                    )
-                                except Exception as signal_err:
-                                    logger.warning(f"Buy signal publish failed (non-critical): {signal_err}")
+                                await gcp_publish_buy_signal(
+                                    ticker=ticker,
+                                    company_name=company_name,
+                                    price=current_price,
+                                    scenario=scenario,
+                                    source="AI Analysis",
+                                    trade_result=trade_result
+                                )
+                            except Exception as signal_err:
+                                logger.warning(f"GCP buy signal publish failed (non-critical): {signal_err}")
 
-                                try:
-                                    from messaging.gcp_pubsub_signal_publisher import publish_buy_signal as gcp_publish_buy_signal
-
-                                    await gcp_publish_buy_signal(
-                                        ticker=ticker,
-                                        company_name=company_name,
-                                        price=current_price,
-                                        scenario=scenario,
-                                        source="AI Analysis",
-                                        trade_result=trade_result
-                                    )
-                                except Exception as signal_err:
-                                    logger.warning(f"GCP buy signal publish failed (non-critical): {signal_err}")
-
-                                signaled_tickers.add(ticker)
+                            signaled_tickers.add(ticker)
 
                         if buy_success:
                             buy_count += 1
@@ -1758,6 +1763,23 @@ class StockTrackingAgent:
                     await asyncio.sleep(wait_time)
                 else:
                     raise
+
+    async def _send_trade_failure_alert(self, action: str, ticker: str, company_name: str, error_message: str) -> None:
+        """Send immediate Telegram alert when a KIS buy/sell order fails."""
+        if not getattr(self, 'telegram_config', None) or not self.telegram_config.use_telegram:
+            return
+        try:
+            action_label = "매도" if action == "sell" else "매수"
+            alert = (
+                f"⚠️ KIS 주문 실패 알림\n\n"
+                f"종목: {company_name}({ticker})\n"
+                f"구분: {action_label}\n"
+                f"오류: {error_message}"
+            )
+            await self._send_with_retry(chat_id=self.telegram_config.channel_id, text=alert)
+            logger.info(f"Trade failure alert sent to Telegram: {ticker} {action_label}")
+        except Exception as e:
+            logger.warning(f"Failed to send trade failure alert: {e}")
 
     async def send_telegram_message(self, chat_id: str, language: str = "ko") -> bool:
         """
