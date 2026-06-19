@@ -194,17 +194,36 @@ def main():
     )
 
     async def _run():
-        message = await generate_weekly_intelligence()
-        print(message)
+        proxy_started = False
+        if os.getenv("PRISM_CLAUDE_AUTH_MODE") == "claude_oauth":
+            try:
+                from cores.claude_proxy import inject_env, start_proxy
+                inject_env()
+                proxy_started = await start_proxy()
+                if not proxy_started:
+                    logger.warning("Claude OAuth proxy failed to start — Anthropic API key required")
+            except Exception as e:
+                logger.warning("Claude OAuth proxy setup error: %s", e)
 
-        if not args.dry_run:
-            await send_to_telegram(message)
+        try:
+            message = await generate_weekly_intelligence()
+            print(message)
 
-            broadcast_languages = [l.strip() for l in args.broadcast_languages.split(",") if l.strip()]
-            if broadcast_languages:
-                await _send_broadcast(message, broadcast_languages)
-        else:
-            logger.info("Dry run mode — message not sent")
+            if not args.dry_run:
+                await send_to_telegram(message)
+
+                broadcast_languages = [l.strip() for l in args.broadcast_languages.split(",") if l.strip()]
+                if broadcast_languages:
+                    await _send_broadcast(message, broadcast_languages)
+            else:
+                logger.info("Dry run mode — message not sent")
+        finally:
+            if proxy_started:
+                try:
+                    from cores.claude_proxy import stop_proxy
+                    await stop_proxy()
+                except Exception:
+                    pass
 
     try:
         asyncio.run(_run())

@@ -1423,7 +1423,11 @@ async def generate_firecrawl_search_response(search_query: str, analysis_prompt:
             server_names=[]
         )
 
-        llm = await agent.attach_llm(AnthropicAugmentedLLM)
+        if os.getenv("PRISM_CLAUDE_AUTH_MODE") == "claude_oauth":
+            from mcp_agent.workflows.llm.augmented_llm_openai import OpenAIAugmentedLLM
+            llm = await agent.attach_llm(OpenAIAugmentedLLM)
+        else:
+            llm = await agent.attach_llm(AnthropicAugmentedLLM)
 
         response = await llm.generate_str(
             message=f"다음은 웹 검색 결과입니다:\n\n{context}\n\n---\n\n{analysis_prompt}",
