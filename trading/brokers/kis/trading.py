@@ -148,9 +148,10 @@ class DomesticStockTrading(BaseTrading):
         )
 
     async def async_sell_stock(self, stock_code: str, timeout: float = 30.0,
-                               limit_price: int = None) -> Dict[str, Any]:
+                               limit_price: int = None,
+                               quantity: Optional[int] = None) -> Dict[str, Any]:
         return await self._orig.async_sell_stock(
-            stock_code, timeout=timeout, limit_price=limit_price,
+            stock_code, timeout=timeout, limit_price=limit_price, quantity=quantity,
         )
 
     def get_portfolio(self) -> List[Dict[str, Any]]:
@@ -320,14 +321,15 @@ class MultiAccountKisTrading:
         return self._aggregate_results(stock_code, results, action="buy")
 
     async def async_sell_stock(self, stock_code: str, timeout: float = 30.0,
-                               limit_price: int = None) -> Dict[str, Any]:
+                               limit_price: int = None,
+                               quantity: Optional[int] = None) -> Dict[str, Any]:
         if not self.account_configs:
             return self._aggregate_results(stock_code, [], action="sell")
         results = []
         for account in self.account_configs:
             trader = self._get_trader(account)
             result = await trader.async_sell_stock(
-                stock_code, timeout=timeout, limit_price=limit_price,
+                stock_code, timeout=timeout, limit_price=limit_price, quantity=quantity,
             )
             result["account_name"] = account["name"]
             result["account_key"] = account["account_key"]

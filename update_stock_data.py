@@ -49,6 +49,13 @@ def update_stock_data(output_file="stock_map.json"):
         code_to_name = load_all_tickers()
         logger.info(f"Loaded {len(code_to_name)} stocks")
 
+        if not code_to_name:
+            logger.error(
+                f"load_all_tickers() returned 0 stocks - refusing to overwrite "
+                f"{output_file} with empty data. Keeping existing file as-is."
+            )
+            return False
+
         # Create reverse mapping
         name_to_code = {name: code for code, name in code_to_name.items()}
 
