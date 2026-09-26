@@ -179,9 +179,20 @@ def prefetch_macro_intelligence_data(reference_date: str) -> dict:
     # 3. Sector map (ticker → sector name) via get_sector_info
     try:
         import json as _json
+
+        # get_sector_info queries KRX for the exact date given — on a
+        # non-trading day (weekend/holiday) KRX has no data yet, so correct
+        # reference_date to the nearest prior business day before calling it.
+        try:
+            from pykrx.stock.stock_api import get_nearest_business_day_in_a_week
+            sector_date = get_nearest_business_day_in_a_week(reference_date, prev=True)
+        except Exception as e:
+            logger.warning(f"Business day correction failed, using reference_date as-is: {e}")
+            sector_date = reference_date
+
         # Fetch KOSPI + KOSDAQ sector classifications
-        kospi_sectors = server.get_sector_info("KOSPI")
-        kosdaq_sectors = server.get_sector_info("KOSDAQ")
+        kospi_sectors = server.get_sector_info("KOSPI", date=sector_date)
+        kosdaq_sectors = server.get_sector_info("KOSDAQ", date=sector_date)
         sector_data = {}
         for raw in [kospi_sectors, kosdaq_sectors]:
             parsed = _json.loads(raw) if isinstance(raw, str) else raw
@@ -222,7 +233,7 @@ def _compute_kr_regime(kospi_ohlcv: dict, kosdaq_ohlcv: dict = None) -> dict:
 
     df.index = pd.to_datetime(df.index)
     df = df.sort_index()
-    df_20d = df.tail(20)
+    df_20d = df.tail(20)  # 20일(약 한달) 기준
 
     # Determine close column name (could be "Close" or "종가")
     close_col = None
@@ -234,45 +245,45 @@ def _compute_kr_regime(kospi_ohlcv: dict, kosdaq_ohlcv: dict = None) -> dict:
         close_col = df.columns[3]  # fallback to 4th column (typically Close)
 
     current_price = float(df_20d[close_col].iloc[-1])
-    ma_20d = float(df_20d[close_col].mean())
+    ma_20d = float(df_20d[close_col].mean())  # 20일 평균
 
     # 2-week change (last 10 trading days)
     if len(df_20d) >= 10:
         price_2w_ago = float(df_20d[close_col].iloc[-10])
     else:
         price_2w_ago = float(df_20d[close_col].iloc[0])
-    change_2w_pct = ((current_price - price_2w_ago) / price_2w_ago) * 100
+    change_2w_pct = ((current_price - price_2w_ago) / price_2w_ago) * 100  # 2주전 가격대비
 
     # MA position
-    ma_diff_pct = ((current_price - ma_20d) / ma_20d) * 100
-    above_ma = current_price > ma_20d
+    ma_diff_pct = ((current_price - ma_20d) / ma_20d) * 100  # 현재값과 20일 평균값 괴리
+    above_ma = current_price > ma_20d   # 현재가가 이동평균 위에 있는지 여부
 
     # simple_ma_regime (pure index-based)
     if abs(ma_diff_pct) <= 0.5:
-        simple_ma_regime = "sideways"
+        simple_ma_regime = "sideways"  # 20일 평균값과 0.5% 이내에 있다면 횡보
     elif above_ma:
-        simple_ma_regime = "bull"
+        simple_ma_regime = "bull"      # 강세
     else:
-        simple_ma_regime = "bear"
+        simple_ma_regime = "bear"      # 약세
 
     # KOSPI 20d trend
-    if change_2w_pct > 2:
-        kospi_trend = "up"
-    elif change_2w_pct < -2:
-        kospi_trend = "down"
+    if change_2w_pct > 2:    # 2주전 가격보다 2% 이상 올라있다면
+        kospi_trend = "up"   # 상승장
+    elif change_2w_pct < -2: # 2주전 가격보다 -2% 이하라면
+        kospi_trend = "down" # 하락장
     else:
-        kospi_trend = "sideways"
+        kospi_trend = "sideways"  # 이도저도 아니면 횡보장
 
     # Market regime classification (KR uses 2-week / ±5% thresholds)
-    if above_ma and change_2w_pct > 5:
-        regime = "strong_bull"
-        confidence = 0.85
-    elif above_ma and change_2w_pct >= 0:
-        regime = "moderate_bull"
-        confidence = 0.75
+    if above_ma and change_2w_pct > 5:  # 현재가가 20일 평균 이상이고 10일전보다 5% 이상 올라있다면
+        regime = "strong_bull"          # 강한 강세장
+        confidence = 0.85               # 확실한 돌파로 판정
+    elif above_ma and change_2w_pct >= 0: # 20일 평균 위인데 10일전보다 5% 미만 상승이라면
+        regime = "moderate_bull"        # 온건 강세장
+        confidence = 0.75               # 방향은 맞으나 강도가 약해 한 단계 낮음
     elif abs(ma_diff_pct) <= 1 and abs(change_2w_pct) < 2:
         regime = "sideways"
-        confidence = 0.65
+        confidence = 0.65               # 가장 애매한 구간(추세도 아니고 명확한 횡보도 아닌 경계)
     elif not above_ma and change_2w_pct < -5:
         regime = "strong_bear"
         confidence = 0.85
@@ -304,16 +315,16 @@ def _compute_kr_regime(kospi_ohlcv: dict, kosdaq_ohlcv: dict = None) -> dict:
             pass
 
     return {
-        "market_regime": regime,
-        "regime_confidence": confidence,
-        "simple_ma_regime": simple_ma_regime,
+        "market_regime": regime,                # 시장국면
+        "regime_confidence": confidence,        # 국면 신호의 신뢰도
+        "simple_ma_regime": simple_ma_regime,   # 단순 평균선 대비 국면
         "index_summary": {
-            "kospi_20d_trend": kospi_trend,
-            "kospi_vs_20d_ma": "above" if above_ma else "below",
+            "kospi_20d_trend": kospi_trend,     # KOSPI 20일 추세
+            "kospi_vs_20d_ma": "above" if above_ma else "below", # KOSPI가 20일 평균 위에 있는지 여부
             "kospi_2w_change_pct": round(change_2w_pct, 2),
             "kospi_current": round(current_price, 2),
             "kospi_20d_ma": round(ma_20d, 2),
-            "kosdaq_20d_trend": kosdaq_trend,
+            "kosdaq_20d_trend": kosdaq_trend,   # KOSDAQ 추세
         }
     }
 
